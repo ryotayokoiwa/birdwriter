@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Bird Writer — Support</title>
+<style>
+  :root { color-scheme: light dark; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, "Helvetica Neue", "Hiragino Kaku Gothic ProN", sans-serif;
+    color: #2B2A27; background: #F7F5F1;
+    line-height: 1.75; -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 640px; margin: 0 auto; padding: 72px 24px 96px; }
+  .icon { width: 60px; height: 60px; display: block; margin-bottom: 24px; }
+  h1 { font-size: 30px; letter-spacing: -.01em; }
+  .tag { color: #8C877D; font-size: 16px; margin-top: 4px; }
+  h2 {
+    font-size: 13px; text-transform: uppercase; letter-spacing: .08em;
+    color: #8C877D; margin: 48px 0 12px; font-weight: 600;
+  }
+  p { margin: 0 0 12px; }
+  a { color: #3A5A8C; text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .q { font-weight: 600; margin-top: 18px; }
+  .lang { color: #8C877D; font-size: 13px; margin-top: 4px; }
+  hr { border: none; border-top: 1px solid #E7E3DB; margin: 40px 0; }
+  footer { color: #B4AEA2; font-size: 13px; margin-top: 56px; }
+  @media (prefers-color-scheme: dark) {
+    body { color: #DDD8CE; background: #201E1B; }
+    .tag, h2, .lang { color: #8C877D; }
+    a { color: #8FB0DE; } hr { border-top-color: #33302B; } footer { color: #6E685C; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <img class="icon" src="icon.png" alt="Bird Writer" width="60" height="60">
+  <h1>Bird Writer</h1>
+  <div class="tag">Write on an infinite canvas</div>
+
+  <h2>Support</h2>
+  <p>Questions, feedback, or bug reports are always welcome. Email
+     <a href="mailto:ryota.yokoiwa@gmail.com">ryota.yokoiwa@gmail.com</a> — I read every message.</p>
+
+  <h2>Frequently Asked Questions</h2>
+
+  <p class="q">Where is my writing stored?</p>
+  <p>Only on your Mac. Bird Writer never connects to the internet, and nothing you write is ever sent anywhere.</p>
+
+  <p class="q">Does it sync across devices?</p>
+  <p>No — everything stays local by design. To move your work between Macs, use “Save Project…” to export a single project file (.bwt) and open it on the other Mac.</p>
+
+  <p class="q">How is my work backed up?</p>
+  <p>Bird Writer saves automatically as you write and keeps generational backups. You can also save your entire workspace as a .bwt project file at any time.</p>
+
+  <p class="q">How do I get my text out?</p>
+  <p>Use File → Export… to save any board or a single box as plain text (.txt).</p>
+
+  <hr>
+
+  <p><a href="privacy.html">Privacy Policy →</a></p>
+
+  <footer>© 2026 Ryota Yokoiwa</footer>
+</div>
+</body>
+</html>

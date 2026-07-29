@@ -1,0 +1,331 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Bird Writer — Writing with an AI assistant</title>
+<style>
+  :root { color-scheme: light dark; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, "Helvetica Neue", "Hiragino Kaku Gothic ProN", sans-serif;
+    color: #2B2A27; background: #F7F5F1;
+    line-height: 1.75; -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 640px; margin: 0 auto; padding: 72px 24px 96px; }
+  .icon { width: 60px; height: 60px; display: block; margin-bottom: 24px; }
+  h1 { font-size: 30px; letter-spacing: -.01em; }
+  .tag { color: #8C877D; font-size: 16px; margin-top: 4px; }
+  h2 {
+    font-size: 13px; text-transform: uppercase; letter-spacing: .08em;
+    color: #8C877D; margin: 48px 0 12px; font-weight: 600;
+  }
+  p { margin: 0 0 12px; }
+  a { color: #3A5A8C; text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  ol { margin: 0 0 12px 20px; }
+  li { margin-bottom: 6px; }
+  code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: .88em; background: #EFEBE3; border-radius: 4px; padding: 1px 5px;
+  }
+  .note {
+    border-left: 3px solid #DCD7CC; padding: 2px 0 2px 14px;
+    color: #5C574E; margin: 18px 0;
+  }
+  .guide {
+    position: relative; margin-top: 12px;
+    border: 1px solid #E7E3DB; border-radius: 10px; background: #FFFFFF;
+  }
+  .guide pre {
+    max-height: 340px; overflow: auto; padding: 16px 18px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 12px; line-height: 1.7; color: #5C574E;
+    white-space: pre-wrap; word-break: break-word;
+  }
+  .copy {
+    position: absolute; top: 10px; right: 10px;
+    border: 1px solid #E7E3DB; background: #F7F5F1; color: #5C574E;
+    border-radius: 7px; padding: 5px 12px; font-size: 12px; cursor: pointer;
+    font-family: inherit;
+  }
+  .copy:hover { border-color: #B4AEA2; color: #2B2A27; }
+  hr { border: none; border-top: 1px solid #E7E3DB; margin: 40px 0; }
+  footer { color: #B4AEA2; font-size: 13px; margin-top: 56px; }
+  @media (prefers-color-scheme: dark) {
+    body { color: #DDD8CE; background: #201E1B; }
+    .tag, h2 { color: #8C877D; }
+    a { color: #8FB0DE; } hr { border-top-color: #33302B; } footer { color: #6E685C; }
+    .note { border-left-color: #33302B; color: #A8A296; }
+    code { background: #33302B; }
+    .guide { border-color: #33302B; background: #2A2824; }
+    .guide pre { color: #A8A296; }
+    .copy { border-color: #33302B; background: #38352F; color: #A8A296; }
+    .copy:hover { border-color: #6E685C; color: #DDD8CE; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <img class="icon" src="icon.png" alt="Bird Writer" width="60" height="60">
+  <h1>Writing with an AI assistant</h1>
+  <div class="tag">AIアシスタントと一緒に書く</div>
+
+  <h2>English</h2>
+
+  <p>Bird Writer stores a whole project — every board, box, connection and note — in a single
+     <code>.bwt</code> file. You can hand that file to an AI assistant (Claude, ChatGPT, …) and have it
+     help with your manuscript.</p>
+
+  <p>An assistant that has never seen Bird Writer will not know what the file means, so give it the
+     guide below first. It explains the format and, just as importantly, the conventions worth respecting —
+     for example that where a box sits on the canvas is the author's thinking made visible, and should not
+     be rearranged.</p>
+
+  <div class="note">
+    <strong>The app has this built in.</strong> Open the ⚙ menu and choose
+    <em>Copy Guide for AI</em> — the text is copied to your clipboard and always matches the version
+    of Bird Writer you are running. The copy below is here for reference.
+  </div>
+
+  <ol>
+    <li>Paste the guide into your AI assistant.</li>
+    <li>Give it your <code>.bwt</code> file (in Bird Writer: <strong>Save As…</strong>, ⌘⇧S / Ctrl+Shift+S).</li>
+    <li>Bring the edited file back in with <strong>Open project…</strong> (⌘O / Ctrl+O).</li>
+  </ol>
+
+  <p>While the assistant is working on the file, don't press ⌘S in Bird Writer — it would overwrite
+     the assistant's edits. Opening a project always backs up the previous state first, so mistakes
+     can be undone.</p>
+
+  <div class="guide">
+    <button class="copy" data-target="g-en">Copy</button>
+    <pre id="g-en"># Editing a Bird Writer project file (.bwt)
+
+I'm writing with Bird Writer, an infinite-canvas writing app. I'll give you my project file (.bwt). Please read it and help me with my manuscript following the rules below.
+
+## About the app
+
+Instead of one long document, the manuscript lives as **text boxes scattered across an infinite canvas**. Zoom out to see the structure of the whole story; zoom in to write a single passage. A "board" (tab) is a large unit such as a work or a chapter.
+
+- **A box's x/y position is the author's thinking made visible.** Boxes placed near each other are related; distance is deliberate. It is not necessarily chronological order.
+- **conns** are lines showing relationships between boxes. **link** jumps to another board or box.
+- **color** is a label whose meaning the author defines (progress, POV character, plot line...).
+- **vert: true** means vertical writing (for Japanese).
+
+## The file is JSON with this shape
+
+```json
+{
+  "version": 1,
+  "settings": { "lang": "ja", "theme": "system", "grid": true, "fontSize": 15 },
+  "cur": 0,
+  "boards": [
+    {
+      "id": 1,
+      "name": "Chapter One",
+      "boxes": [
+        {
+          "id": 1,
+          "type": "text",
+          "x": 100, "y": 80,
+          "w": 260, "h": 180,
+          "text": "The text. Newlines are \n.",
+          "title": "I. Daybreak",
+          "vert": false,
+          "color": "sky",
+          "link": null
+        },
+        {
+          "id": 2,
+          "type": "text",
+          "x": 400, "y": 80,
+          "w": 260, "h": 180,
+          "text": "The next scene.",
+          "title": "",
+          "vert": false,
+          "color": "none",
+          "link": null
+        }
+      ],
+      "conns": [ { "a": 1, "b": 2 } ],
+      "view": { "x": 60, "y": 80, "s": 1 }
+    }
+  ]
+}
+```
+
+- `type` is "text" or "image". An image box has a `src` field holding a huge base64 data URI — **never modify, reformat, or drop it**.
+- `title` is an optional heading (empty string = none).
+- `color` is one of "none" | "sky" | "coral" | "mint" | "lemon".
+- `link` is null, a board id (number), or {"board": id, "box": id}.
+
+## Editing rules
+
+- **Revising text**: just rewrite `boxes[].text`. Plain text only (\n for newlines) — no HTML or Markdown decoration; it would be shown literally.
+- **Adding a box**: append a text box. Its `id` must be **unused across the whole file** (safest: max existing id + 1). Place `x`/`y` where it does not overlap existing boxes.
+- **Deleting a box**: remove it from `boxes`, and also remove any `conns` entry containing its id and any `link` pointing at it.
+- **Do not move or resize existing boxes.** The layout is the author's map of their own thinking.
+- Respect the granularity: **one box ≈ one scene or fragment.** Don't merge or split without being asked (suggesting is fine).
+- Don't reassign `color` meanings by guessing. Use "none" for new boxes.
+- Do not edit `settings`, `view`, or `cur`.
+- **Output must be valid JSON** (no comments, no trailing commas). A file with an empty `boards` array will be rejected by the app.
+
+## Safe workflow
+
+1. In Bird Writer: **Save As… (⌘⇧S / Ctrl+Shift+S)** to a place you can reach, e.g. ~/Documents/mynovel.bwt
+2. You edit that file and save it as valid JSON.
+3. In Bird Writer: **Open project… (⌘O / Ctrl+O)** and choose the file.
+
+⚠️ **While you are editing the file, I must not press ⌘S in Bird Writer** — it would overwrite your changes. Opening the edited file automatically backs up the previous state first, so mistakes can be recovered.
+
+If I only want you to read the manuscript, exporting to .txt from the app (⌘E / Ctrl+E) is simpler — but layout information is lost.</pre>
+  </div>
+
+  <hr>
+
+  <h2>日本語</h2>
+
+  <p>Bird Writer は、プロジェクト全体（すべてのボード・ボックス・接続線・メモ）を1つの
+     <code>.bwt</code> ファイルに保存します。このファイルを AI アシスタント（Claude や ChatGPT など）に
+     渡せば、原稿の作業を手伝ってもらえます。</p>
+
+  <p>ただし Bird Writer を知らないアシスタントには、このファイルが何なのか分かりません。
+     下の説明を先に渡してください。データ構造だけでなく、
+     <strong>ボックスの位置は作者の思考の配置そのものだから動かさない</strong>といった、
+     尊重してほしい約束事も書いてあります。</p>
+
+  <div class="note">
+    <strong>この説明はアプリに内蔵されています。</strong> ⚙メニュー →
+    <em>「AI用の説明をコピー」</em>でクリップボードに入ります。お使いのバージョンの仕様と必ず一致するので、
+    普段はそちらが確実です（下のものは参照用です）。
+  </div>
+
+  <ol>
+    <li>下の説明を AI アシスタントに貼り付ける</li>
+    <li><code>.bwt</code> ファイルを渡す（Bird Writer の<strong>「別名で保存…」</strong>⌘⇧S / Ctrl+Shift+S）</li>
+    <li>編集後のファイルを<strong>「プロジェクトを開く…」</strong>（⌘O / Ctrl+O）で読み込む</li>
+  </ol>
+
+  <p>アシスタントがファイルを編集している間は、Bird Writer で ⌘S（上書き保存）を押さないでください
+     — アシスタントの編集が消えてしまいます。読み込み時は直前の状態が自動でバックアップされるので、
+     失敗しても元に戻せます。</p>
+
+  <div class="guide">
+    <button class="copy" data-target="g-ja">コピー</button>
+    <pre id="g-ja"># Bird Writer のプロジェクトファイル（.bwt）を編集するための手引き
+
+私は Bird Writer という「無限キャンバス執筆アプリ」で原稿を書いています。これから .bwt ファイルを渡すので、下記のルールに従って原稿の作業を手伝ってください。
+
+## アプリについて
+
+原稿は1本の長い文書ではなく、**広いキャンバスに散らばるテキストボックス（断章・シーン・メモ）**として存在します。ズームアウトすると全体の構造が見え、ズームインすると1つの文章に没入して書く、という道具です。「ボード」（上部のタブ）は作品や章などの大きな単位です。
+
+- **ボックスの x / y は作者の思考の配置そのものです。** 近くに置かれたものは関係が近く、離れているのは意図的です。時系列順とは限りません。
+- **conns** はボックス間の関係を示す線、**link** は別ボード/別ボックスへのジャンプです。
+- **color** は作者が意味を決める色ラベルです（進捗、視点人物、プロットラインなど）。
+- **vert: true** は縦書きです。
+
+## ファイルは次の形の JSON です
+
+```json
+{
+  "version": 1,
+  "settings": { "lang": "ja", "theme": "system", "grid": true, "fontSize": 15 },
+  "cur": 0,
+  "boards": [
+    {
+      "id": 1,
+      "name": "第一章",
+      "boxes": [
+        {
+          "id": 1,
+          "type": "text",
+          "x": 100, "y": 80,
+          "w": 260, "h": 180,
+          "text": "本文。改行は \n。",
+          "title": "一 夜明け",
+          "vert": false,
+          "color": "sky",
+          "link": null
+        },
+        {
+          "id": 2,
+          "type": "text",
+          "x": 400, "y": 80,
+          "w": 260, "h": 180,
+          "text": "次の場面。",
+          "title": "",
+          "vert": false,
+          "color": "none",
+          "link": null
+        }
+      ],
+      "conns": [ { "a": 1, "b": 2 } ],
+      "view": { "x": 60, "y": 80, "s": 1 }
+    }
+  ]
+}
+```
+
+- `type` は "text" か "image"。画像ボックスには巨大な base64 の `src` があります — **絶対に変更・整形・削除しないでください**。
+- `title` は任意の見出し（空文字 = 無し）。
+- `color` は "none" | "sky" | "coral" | "mint" | "lemon" のいずれか。
+- `link` は null / ボードid（数値）/ {"board": id, "box": id}。
+
+## 編集ルール
+
+- **本文の加筆・推敲**は `boxes[].text` を書き換えるだけです。プレーンテキスト（改行は \n）で、HTML やマークダウンの装飾は入れないでください（そのまま文字として表示されます）。
+- **ボックスの追加**は `boxes` に text ボックスを足します。`id` は**ファイル全体で未使用の数値**にしてください（既存の最大 id + 1 が安全）。`x`/`y` は既存のボックスと重ならない位置に。
+- **ボックスの削除**時は、その id を含む `conns` と、その id を指す `link` も一緒に消してください。
+- **既存ボックスの位置やサイズは動かさないでください。** 配置は作者の思考地図です。
+- 粒度を尊重してください: **1ボックス ≈ 1シーン / 1断章**。指示なく結合・分割しないでください（提案は歓迎です）。
+- 色ラベルの意味を推測で変えないでください。新規ボックスは "none" のままで。
+- `settings` / `view` / `cur` は編集しないでください。
+- **出力は必ず妥当な JSON**（コメント・末尾カンマ不可）。`boards` が空だとアプリが読み込みを拒否します。
+
+## 安全な進め方
+
+1. Bird Writer で **「別名で保存…」（⌘⇧S / Ctrl+Shift+S）** して、あなたがアクセスできる場所に置く（例: ~/Documents/作品名.bwt）
+2. あなたがそのファイルを編集し、妥当な JSON として保存する
+3. Bird Writer で **「プロジェクトを開く…」（⌘O / Ctrl+O）** から読み込む
+
+⚠️ **あなたが編集している間、私は Bird Writer で ⌘S（上書き保存）を押しません** — 押すとあなたの編集が消えてしまうためです。読み込み時は直前の状態が自動でバックアップされるので、失敗しても復元できます。
+
+原稿を読んでもらうだけなら、アプリの「書き出し…（⌘E / Ctrl+E）」で .txt にする方が手軽です（ただしレイアウト情報は失われます）。</pre>
+  </div>
+
+  <hr>
+
+  <p><a href="index.html">← Support</a></p>
+
+  <footer>© 2026 Ryota Yokoiwa</footer>
+</div>
+
+<script>
+document.querySelectorAll('.copy').forEach(function (btn) {
+  btn.addEventListener('click', function () {
+    var pre = document.getElementById(btn.dataset.target);
+    var text = pre.textContent;
+    var done = function () {
+      var label = btn.textContent;
+      btn.textContent = btn.dataset.target === 'g-ja' ? 'コピーしました' : 'Copied';
+      setTimeout(function () { btn.textContent = label; }, 1600);
+    };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(done, function () { select(pre); });
+    } else {
+      select(pre);
+    }
+  });
+});
+function select(pre) {
+  var r = document.createRange();
+  r.selectNodeContents(pre);
+  var s = window.getSelection();
+  s.removeAllRanges();
+  s.addRange(r);
+}
+</script>
+</body>
+</html>

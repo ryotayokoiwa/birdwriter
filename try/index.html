@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="ja" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Bird Writer — ブラウザで試す / Try in your browser</title>
+<link rel="stylesheet" href="fonts/fonts.css">
+<link rel="stylesheet" href="styles.css?v=9051416">
+<link rel="stylesheet" href="demo.css?v=9051416">
+</head>
+<body>
+
+<div id="topbar">
+  <div id="appicon">B</div>
+  <button id="backBtn" title="" hidden>←</button>
+  <div id="tabs"></div>
+  <button id="addBoard" title="">＋</button>
+  <div class="spacer"></div>
+  <button id="saveWarn" hidden></button>
+  <span id="totalCount"></span>
+  <div class="zoomctl">
+    <button id="zoomOut" title="">−</button>
+    <span id="zoomLabel">100%</span>
+    <button id="zoomIn" title="">＋</button>
+    <span class="zsep"></span>
+    <button id="fitBtn" title=""></button>
+  </div>
+  <button id="setBtn" title="">⚙</button>
+</div>
+
+<div id="viewport">
+  <div id="world">
+    <svg id="wires"></svg>
+  </div>
+</div>
+
+<div id="toolbar" hidden>
+  <button id="tbVert" class="tbtn"></button>
+  <span class="sep" id="sepVert"></span>
+  <span class="swatches">
+    <button class="sw" data-c="none"></button>
+    <button class="sw" data-c="sky"></button>
+    <button class="sw" data-c="coral"></button>
+    <button class="sw" data-c="mint"></button>
+    <button class="sw" data-c="lemon"></button>
+  </span>
+  <span class="sep"></span>
+  <button id="tbConn" class="tbtn"></button>
+  <button id="tbLink" class="tbtn"></button>
+  <button id="tbTitle" class="tbtn"></button>
+  <button id="tbFocus" class="tbtn"></button>
+  <button id="tbSplit" class="tbtn"></button>
+  <span class="sep"></span>
+  <span id="tbCount"></span>
+  <button id="tbArrange" class="tbtn"></button>
+  <button id="tbMerge" class="tbtn"></button>
+  <button id="tbDel" class="tbtn danger"></button>
+</div>
+
+<div id="focus">
+  <div id="focusBar">
+    <span id="focusCount"></span>
+    <div class="spacer"></div>
+    <button id="focusVt"></button>
+    <button id="focusClose"></button>
+  </div>
+  <div id="focusScroll"><div id="focusContent" contenteditable="true" spellcheck="false"></div></div>
+</div>
+
+<div id="search" hidden>
+  <div id="searchDrag" title=""></div>
+  <input id="searchInput" type="text" spellcheck="false" placeholder="">
+  <div id="searchRow2">
+    <input id="replaceInput" type="text" spellcheck="false" placeholder="">
+    <button id="replaceAllBtn" disabled></button>
+  </div>
+  <div id="searchMeta" hidden></div>
+  <div id="searchResults"></div>
+</div>
+
+<div id="overlay" hidden>
+  <div id="dialog"></div>
+</div>
+
+<div id="marquee" hidden></div>
+<div id="hint"></div>
+<div id="menu"></div>
+<input type="file" id="imgInput" accept="image/*" hidden>
+
+<script>window.BW_DEMO_VERSION="9051416"</script>
+<script src="demo.js?v=9051416"></script>
+</body>
+</html>

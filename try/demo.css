@@ -10,23 +10,29 @@
 #bwDemoChip a:hover { text-decoration: underline; }
 #bwDemoChip button { width: 22px; height: 22px; border: 1px solid var(--hairline); border-radius: 50%; background: transparent; color: var(--ink-muted); cursor: pointer; font: 600 12px var(--font-ui); }
 #bwDemoChip button:hover { background: var(--ui-fill); color: var(--ink); }
+#bwDemoChip .days { color: var(--ink); font-weight: 600; font-variant-numeric: tabular-nums; }
 
-#bwDemoIntro, #bwDemoGate { position: fixed; inset: 0; z-index: 700; background: var(--overlay-bg); display: grid; place-items: center; font-family: var(--font-ui); }
+#bwDemoIntro, #bwDemoGate, #bwDemoLock { position: fixed; inset: 0; z-index: 700; background: var(--overlay-bg); display: grid; place-items: center; font-family: var(--font-ui); }
 #bwDemoGate { background: var(--canvas-bg); }
-#bwDemoIntro .card, #bwDemoGate .card {
+/* 期限後のロック: 本体のヒント(#hint: 500)と書き出しダイアログ(#overlay: 600)より下、それ以外の UI より上 */
+#bwDemoLock { z-index: 450; }
+#bwDemoIntro .card, #bwDemoGate .card, #bwDemoLock .card {
   width: min(540px, calc(100vw - 40px)); background: var(--card-bg); color: var(--ink);
   border-radius: 14px; box-shadow: var(--shadow-bar); padding: 26px 28px 20px;
 }
-#bwDemoIntro h2, #bwDemoGate h2 { font-size: 18px; font-weight: 700; margin: 0 0 14px; letter-spacing: .02em; }
-#bwDemoIntro p, #bwDemoGate p { margin: 0 0 10px; font-size: 13.5px; line-height: 1.8; color: var(--ink-soft); }
+#bwDemoIntro h2, #bwDemoGate h2, #bwDemoLock h2 { font-size: 18px; font-weight: 700; margin: 0 0 14px; letter-spacing: .02em; }
+#bwDemoIntro p, #bwDemoGate p, #bwDemoLock p { margin: 0 0 10px; font-size: 13.5px; line-height: 1.8; color: var(--ink-soft); }
 #bwDemoIntro p b { color: var(--ink); font-weight: 600; }
 #bwDemoIntro p.small { font-size: 12px; color: var(--ink-muted); }
-#bwDemoIntro .btns { display: flex; align-items: center; gap: 12px; margin-top: 18px; flex-wrap: wrap; }
+#bwDemoIntro .btns, #bwDemoLock .btns { display: flex; align-items: center; gap: 12px; margin-top: 18px; flex-wrap: wrap; }
 #bwDemoIntro .grow { flex: 1; }
 #bwDemoIntro .link, #bwDemoGate a { color: var(--selection); text-decoration: none; font-weight: 600; font-size: 13px; }
 #bwDemoIntro .muted { color: var(--ink-faint); font-size: 12px; }
-#bwDemoIntro .primary { border: none; border-radius: 8px; background: var(--badge-bg); color: var(--badge-fg); padding: 8px 18px; font: 600 13px var(--font-ui); cursor: pointer; }
-#bwDemoIntro .primary:focus-visible { outline: 2px solid var(--selection); outline-offset: 2px; }
+#bwDemoIntro .primary, #bwDemoLock .primary { border: none; border-radius: 8px; background: var(--badge-bg); color: var(--badge-fg); padding: 8px 18px; font: 600 13px var(--font-ui); cursor: pointer; }
+#bwDemoIntro .primary:focus-visible, #bwDemoLock .primary:focus-visible, #bwDemoLock button:focus-visible { outline: 2px solid var(--selection); outline-offset: 2px; }
 #bwDemoIntro .reset { margin: 14px 0 0; text-align: right; }
 #bwDemoIntro .linkbtn { border: none; background: transparent; color: var(--ink-faint); font: 11px var(--font-ui); cursor: pointer; text-decoration: underline; }
 #bwDemoIntro .linkbtn:hover { color: var(--danger); }
+#bwDemoLock .primary { text-decoration: none; display: inline-block; }
+#bwDemoLock button { border: 1px solid var(--hairline); border-radius: 8px; background: var(--ui-fill); color: var(--ink); padding: 7px 14px; font: 600 13px var(--font-ui); cursor: pointer; }
+#bwDemoLock button:hover { border-color: var(--ink-faint); }

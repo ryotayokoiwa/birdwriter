@@ -4,6 +4,8 @@
 // ================= Tauri ブリッジ =================
 // Tauri 上では Rust コマンド、ブラウザ検証時は localStorage にフォールバック
 const TAURI = window.__TAURI__ || null;
+// Web 体験版(web-demo/demo.js)が本体の読み込み前に立てるフラグ。無いとき(アプリ版)は何も変えない
+const DEMO = window.BW_DEMO || null;
 const persist = TAURI ? {
   load: () => TAURI.core.invoke('load_state'),
   save: (data) => TAURI.core.invoke('save_state', { data }),
@@ -151,6 +153,7 @@ const STR = {
     kbSave: 'プロジェクトを保存',
     kbSaveAs: '別名で保存',
     kbOpen: 'プロジェクトを開く',
+    demoNoOpen: '体験版では開けません。アプリ版でどうぞ',
     kbExport: 'テキスト書き出し',
     kbUndo: '取り消し / やり直し',
     kbBack: '前のボードへ戻る',
@@ -284,6 +287,7 @@ const STR = {
     kbSave: 'Save project',
     kbSaveAs: 'Save as…',
     kbOpen: 'Open project',
+    demoNoOpen: 'Not available in the trial. Please use the app.',
     kbExport: 'Export text',
     kbUndo: 'Undo / redo',
     kbBack: 'Back to previous board',
@@ -2428,8 +2432,8 @@ $('setBtn').addEventListener('click', (e) => {
     { label: t('exportMenu'), action: () => openExportDialog() },
     { label: t('projSave'), action: () => saveProject() },
     { label: t('projSaveAs'), action: () => saveProjectAs() },
-    { label: t('projOpen'), action: () => openProjectDialog() },
-    ...(recentProjects.length ? [
+    ...(DEMO?.noOpen ? [] : [{ label: t('projOpen'), action: () => openProjectDialog() }]), // 体験版では出さない
+    ...(recentProjects.length && !DEMO?.noOpen ? [
       { header: t('recentLabel') },
       ...recentProjects.slice(0, 5).map(p => {
         const name = baseName(p).replace(/\.bwt$/i, '');
@@ -3619,6 +3623,12 @@ addEventListener('keydown', (e) => {
     if (e.shiftKey) saveProjectAs(); else saveProject();
     return;
   }
+  if (mod && (e.key === 'o' || e.key === 'O') && DEMO?.noOpen) {
+    // 体験版: 開く(⌘O)は無効。ブラウザ既定の「ファイルを開く」も抑止して案内だけ出す
+    e.preventDefault();
+    hint(t('demoNoOpen'), 3500);
+    return;
+  }
   if (mod && e.key === 'Enter') {
     if (e.isComposing) return;
     e.preventDefault();
@@ -3838,6 +3848,8 @@ async function boot() {
   }
 }
 
+// 体験版のロック画面から書き出しを呼べるように、フラグがあるときだけ公開する
+if (DEMO) Object.assign(DEMO, { saveProjectAs, openExportDialog });
 boot();
 // 同梱フォントの読込完了後にフィットし直す(読込前の代替フォントで測った高さのズレを直す)
 document.fonts?.ready?.then?.(() => fitAllBoxes());

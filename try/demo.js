@@ -137,7 +137,8 @@
     document.body.appendChild(o);
 
     // ロック中はキャンバスを操作させない。マウスはロック画面が全面で受け、キー入力・貼り付けは
-    // 本体(window のリスナー)に届く前に止める。通すのはこのカードの中と、本体の書き出しダイアログ(#overlay)の中だけ
+    // 本体(window のリスナー)に届く前に止める（本体も window で聞くため stopImmediatePropagation。
+    // stopPropagation では同じノード上の本体リスナーが動いてしまう）。通すのはこのカードの中と、本体の書き出しダイアログ(#overlay)の中だけ
     const inCard = (el) => el instanceof Node && o.contains(el);
     const inDialog = (el) => el instanceof Node && !!overlay && !overlay.hidden && overlay.contains(el);
     const focusCard = () => o.querySelector('a, button')?.focus();
@@ -146,11 +147,11 @@
         if (e.key === 'Escape' && overlay && !overlay.hidden) return; // ダイアログを閉じる Esc はどこからでも本体へ
         if (inDialog(e.target)) {
           // ダイアログ内: 閉じる/選ぶ/書き出すための操作は通し、⌘付きのショートカット(取り消し等)は止める
-          if ((e.metaKey || e.ctrlKey) && !/^[ac]$/i.test(e.key || '')) { e.stopPropagation(); e.preventDefault(); }
+          if ((e.metaKey || e.ctrlKey) && !/^[ac]$/i.test(e.key || '')) { e.stopImmediatePropagation(); e.preventDefault(); }
           return;
         }
-        if (inCard(e.target)) { e.stopPropagation(); return; } // カード内: 既定動作(Tab / Enter)だけ
-        e.stopPropagation(); e.preventDefault();
+        if (inCard(e.target)) { e.stopImmediatePropagation(); return; } // カード内: 既定動作(Tab / Enter)だけ
+        e.stopImmediatePropagation(); e.preventDefault();
         if (e.type === 'keydown' && e.key === 'Tab') focusCard();
       }, true);
     }

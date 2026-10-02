@@ -50,15 +50,16 @@
     return;
   }
 
-  // ⑤ 7日間の期限: 初回訪問の時刻を記録し、残日数を出す。
-  //    判定は起動時だけ(使用中に切れても次回起動でロック)。時計が戻っていたら初回扱いで記録し直す
+  // ⑤ 7日間の期限: 初回訪問の時刻を記録し、残日数を出す。起動時に判定し、使用中に期限が来た場合は
+  //    下の recheck でその場でロックする。時計が戻っていたら初回扱いで記録し直す
   const START_KEY = 'bw-demo-start', DAY = 86400e3, now = Date.now();
   let start = now;
   try {
     const v = Number(localStorage.getItem(START_KEY));
     if (v > 0 && v <= now) start = v; else localStorage.setItem(START_KEY, String(now));
   } catch (e) { console.warn('trial start not stored', e); }
-  const daysLeft = Math.max(0, Math.ceil((start + TRIAL_DAYS * DAY - now) / DAY));
+  const deadline = start + TRIAL_DAYS * DAY;
+  const daysLeft = Math.max(0, Math.ceil((deadline - now) / DAY));
   const expired = daysLeft <= 0;
 
   // ② 初回: サンプル原稿を仕込む(2回目以降はそのブラウザの続きから)
@@ -88,6 +89,22 @@
   chip.innerHTML = `<b>${S.chip}</b><span class="days">${S.days(daysLeft)}</span><span>${S.chipNote}</span><a href="${STORE_MAC}" target="_blank" rel="noopener">${S.get}</a><button type="button" title="${S.about}" aria-label="${S.about}">?</button>`;
   chip.querySelector('button').addEventListener('click', showIntro);
   document.body.appendChild(chip);
+
+  // ⑤ 使用中に期限が来たらその場でロック(起動時の判定だけだと、タブを開いたままで使い続けられるため)。
+  //    タブが前面に戻ったとき(bfcache からの復帰を含む)と 1 分おきに確認する。原稿は本体が自動保存しているので失われない
+  let locked = false;
+  const recheck = () => {
+    if (locked || Date.now() < deadline) return;
+    locked = true;
+    chip.remove();
+    document.getElementById('bwDemoIntro')?.remove();
+    document.body.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })); // 開いている ⚙メニューを本体の作法(window の mousedown)で閉じる
+    showLock();
+  };
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') recheck(); });
+  addEventListener('focus', recheck);
+  addEventListener('pageshow', recheck);
+  setInterval(recheck, 60e3);
 
   function showIntro() {
     if (document.getElementById('bwDemoIntro')) return;
@@ -135,6 +152,8 @@
       overlay?.querySelector('button, input, [tabindex]')?.focus(); // キーボードでもダイアログを操作できるように
     });
     document.body.appendChild(o);
+    // ロック中にファイルを落としても、ブラウザがそのファイルを開いてページを離れないように(ダイアログの上も含めて全面)
+    for (const type of ['dragover', 'drop']) window.addEventListener(type, (e) => e.preventDefault(), true);
 
     // ロック中はキャンバスを操作させない。マウスはロック画面が全面で受け、キー入力・貼り付けは
     // 本体(window のリスナー)に届く前に止める（本体も window で聞くため stopImmediatePropagation。

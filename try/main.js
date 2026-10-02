@@ -112,6 +112,12 @@ const STR = {
     boardDelBody: (n, c) => `「${n}」を削除します。ボックス ${c} 個も削除され、他のボードからこのボードへのリンクは解除されます。この操作はアンドゥできません（直前の状態は自動バックアップへ保存されます）。`,
     boardDelBtn: '削除する',
     projSave: 'プロジェクトを保存', projSaveAs: '別名で保存…', projOpen: 'プロジェクトを開く…',
+    projNew: '新規プロジェクト…',
+    projNewConfirmTitle: '新規プロジェクト',
+    projNewConfirmBody: 'いまの作品を .bwt に保存してから、新しいプロジェクトを作ります。',
+    projNewConfirmBtn: '保存して続ける',
+    projNewDone: n => `新しいプロジェクトを作成しました: ${n}`,
+    projNewBoard: '無題',
     recentLabel: '最近使ったプロジェクト',
     projDefaultName: n => `プロジェクト ${n}`,
     projSaved: n => `保存しました: ${n}`,
@@ -158,6 +164,7 @@ const STR = {
     kbSearch: '検索と置換',
     kbSave: 'プロジェクトを保存',
     kbSaveAs: '別名で保存',
+    kbNewProj: '新規プロジェクト（いまの作品を保存してから）',
     kbOpen: 'プロジェクトを開く',
     demoNoOpen: '体験版では開けません。アプリ版でどうぞ',
     kbExport: 'テキスト書き出し',
@@ -252,6 +259,12 @@ const STR = {
     boardDelBody: (n, c) => `Delete “${n}”? Its ${c} box(es) will be removed, and links to this board will be cleared. This cannot be undone (the current state is saved to backups first).`,
     boardDelBtn: 'Delete',
     projSave: 'Save Project', projSaveAs: 'Save As…', projOpen: 'Open project…',
+    projNew: 'New Project…',
+    projNewConfirmTitle: 'New project',
+    projNewConfirmBody: 'The current work will be saved to a .bwt file first, then a new project is created.',
+    projNewConfirmBtn: 'Save & continue',
+    projNewDone: n => `Created a new project: ${n}`,
+    projNewBoard: 'Untitled',
     recentLabel: 'Recent Projects',
     projDefaultName: n => `Project ${n}`,
     projSaved: n => `Saved: ${n}`,
@@ -298,6 +311,7 @@ const STR = {
     kbSearch: 'Search & replace',
     kbSave: 'Save project',
     kbSaveAs: 'Save as…',
+    kbNewProj: 'New project (saves the current work first)',
     kbOpen: 'Open project',
     demoNoOpen: 'Not available in the trial. Please use the app.',
     kbExport: 'Export text',
@@ -2495,6 +2509,7 @@ $('setBtn').addEventListener('click', (e) => {
     { label: t('exportMenu'), action: () => openExportDialog() },
     { label: t('projSave'), action: () => saveProject() },
     { label: t('projSaveAs'), action: () => saveProjectAs() },
+    ...(DEMO?.noOpen ? [] : [{ label: t('projNew'), action: () => newProject() }]), // 体験版では「開く」と同様に出さない
     ...(DEMO?.noOpen ? [] : [{ label: t('projOpen'), action: () => openProjectDialog() }]), // 体験版では出さない
     ...(recentProjects.length && !DEMO?.noOpen ? [
       { header: t('recentLabel') },
@@ -3016,34 +3031,53 @@ function updateTitle() {
   }
 }
 
-// ⌘⇧S: 保存先を選んで書き出し、以後そのファイルを ⌘S の上書き先にする
+// .bwt の既定ファイル名(日付入り)
+const defaultProjName = () => t('projDefaultName', new Date().toISOString().slice(0, 10)) + '.bwt';
+// 保存ダイアログで .bwt の保存先を選ぶ(Tauri)。キャンセルは null
+async function chooseProjectPath(defaultPath) {
+  const options = { defaultPath, filters: BWT_FILTER };
+  const path = TAURI.dialog?.save
+    ? await TAURI.dialog.save(options)
+    : await TAURI.core.invoke('plugin:dialog|save', { options });
+  return path || null;
+}
+// .bwt を書き、そのファイルを以後の ⌘S の上書き先にする(Tauri。別名で保存 / 新規プロジェクト 共通)
+async function writeProjectFile(path, content) {
+  await TAURI.core.invoke('write_text_file', { path, content });
+  bwtSynced = content;
+  setProjPath(path);
+}
+// ブラウザ検証用: .bwt をダウンロードとして保存する(関連付けは付かない)
+function downloadProjectFile(name, content) {
+  const a = document.createElement('a');
+  const url = URL.createObjectURL(new Blob([content], { type: 'application/json' }));
+  a.href = url; a.download = name;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+// ⌘⇧S: 保存先を選んで書き出し、以後そのファイルを ⌘S の上書き先にする。
+// 戻り値 = 保存先(ブラウザはファイル名)。キャンセル / 失敗は null(失敗はヒント表示済み)
 async function saveProjectAs() {
   closeMenu();
   await flushSave();
   const content = serialize(true);
-  const name = t('projDefaultName', new Date().toISOString().slice(0, 10)) + '.bwt';
+  const name = defaultProjName();
   try {
     if (TAURI) {
-      const options = { defaultPath: projPath ?? name, filters: BWT_FILTER };
-      const path = TAURI.dialog?.save
-        ? await TAURI.dialog.save(options)
-        : await TAURI.core.invoke('plugin:dialog|save', { options });
-      if (!path) return;
-      await TAURI.core.invoke('write_text_file', { path, content });
-      bwtSynced = content;
-      setProjPath(path);
+      const path = await chooseProjectPath(projPath ?? name);
+      if (!path) return null;
+      await writeProjectFile(path, content);
       hint(t('projSaved', path), 3500);
-    } else {
-      const a = document.createElement('a');
-      const url = URL.createObjectURL(new Blob([content], { type: 'application/json' }));
-      a.href = url; a.download = name;
-      a.click();
-      setTimeout(() => URL.revokeObjectURL(url), 1000);
-      hint(t('projSaved', name), 3000);
+      return path;
     }
+    downloadProjectFile(name, content);
+    hint(t('projSaved', name), 3000);
+    return name;
   } catch (e) {
     console.error('project save failed', e);
     hint(t('saveErr') + '：' + String(e?.message ?? e).slice(0, 120), 6000);
+    return null;
   }
 }
 
@@ -3062,6 +3096,116 @@ async function saveProject() {
   } catch (e) {
     console.error('project overwrite failed, falling back to save-as', e);
     return saveProjectAs();
+  }
+}
+
+// 関連付け済みの .bwt へ黙って上書きする(新規プロジェクトの前に、いまの作品を守る)。
+// ⌘S と違い、失敗しても別名保存へは流れず false を返す(ヒント表示済み)
+async function overwriteProject() {
+  if (!TAURI || projPath == null) return true;
+  await flushSave();
+  try {
+    const content = serialize(true);
+    await TAURI.core.invoke('write_text_file', { path: projPath, content });
+    bwtSynced = content;
+    updateTitle();
+    return true;
+  } catch (e) {
+    console.error('project overwrite failed', e);
+    hint(t('saveErr') + '：' + String(e?.message ?? e).slice(0, 120), 6000);
+    return false;
+  }
+}
+
+// ワークスペースに作品があるか(初期状態 = ボード1枚・初期名・ボックス0 以外は「ある」)
+function hasContent() {
+  if (boards.length !== 1) return true;
+  const b = boards[0];
+  const defaults = [STR.ja.boardN(1), STR.en.boardN(1), STR.ja.projNewBoard, STR.en.projNewBoard];
+  return b.boxes.length > 0 || !defaults.includes(b.name);
+}
+
+// ⌘⇧N / ⚙「新規プロジェクト…」: 作品ごとに別の .bwt で並行して書けるように、
+// ワークスペースを空にして新しい .bwt に関連付ける。順序:
+//  a. 編集の確定(開くと同じ作法) → b. いまの作品を守る(関連付けありで未保存なら黙って上書き /
+//  関連付け無しで内容があれば確認して別名で保存) → c. 新ファイルの保存先を選ぶ(キャンセルで中止) →
+//  f. 強制バックアップ → 新ファイルを書く → d. 空にする(settings と最近使った項目は引き継ぐ) → e. 関連付け。
+// ブラウザ検証では保存ダイアログがダウンロードになるので、空にしたあと新プロジェクトの初期 .bwt をダウンロードし、関連付けは付かない
+let newProjectBusy = false;
+async function newProject() {
+  closeMenu();
+  if (DEMO?.noOpen) { hint(t('demoNoOpen'), 3500); return; } // 体験版: 開くと同様に無効
+  if (newProjectBusy) return; // ネイティブメニューと keydown の両方が発火する環境での二重起動を防ぐ
+  newProjectBusy = true;
+  try {
+    // a. 編集中・集中モード・検索パネルは確定 / 閉じる
+    closeFocus({ resume: false });
+    closeSearch();
+    endConnect();
+    endLinkPick(true);
+    if (editing != null) { document.activeElement?.blur(); editing = null; }
+    // b. いまの作品を守る
+    if (projPath != null) {
+      if (bwtDirty() && !(await overwriteProject())) return;
+    } else if (hasContent()) {
+      const go = await showConfirm(t('projNewConfirmTitle'), t('projNewConfirmBody'), t('projNewConfirmBtn'));
+      if (!go) return;
+      if (!(await saveProjectAs())) return; // キャンセル / 失敗なら中止
+    }
+    // c. 新しいプロジェクトの保存先(別名で保存と同じダイアログ)
+    const name = defaultProjName();
+    let path = null;
+    if (TAURI) {
+      try { path = await chooseProjectPath(name); }
+      catch (e) {
+        console.error('new project dialog failed', e);
+        hint(t('saveErr') + '：' + String(e?.message ?? e).slice(0, 120), 6000);
+        return;
+      }
+      if (!path) return;
+    }
+    // f. 置き換え直前に現在の状態を保存 + 強制バックアップ(b で保存していても念のため)。できなければ中止
+    if (!(await guardDestructive())) { hint(t('guardErr'), 5000); return; }
+    // 空のワークスペース(今の設定を引き継ぐ)。先に内容を確定しておき、書き込みに失敗したら今の作品を触らずに中止する
+    const content = JSON.stringify({ version: 1, settings, cur: 0, boards: [{ id: 1, name: t('projNewBoard'), boxes: [], conns: [], view: { x: 60, y: 80, s: 1 } }] });
+    if (TAURI) {
+      try { await TAURI.core.invoke('write_text_file', { path, content }); }
+      catch (e) {
+        console.error('new project write failed', e);
+        hint(t('saveErr') + '：' + String(e?.message ?? e).slice(0, 120), 6000);
+        return;
+      }
+    }
+    // d. ワークスペースを空に(hydrate で採番 uid / bid もリセットされる)。settings と最近使った項目は引き継ぐ
+    const keepSettings = { ...settings };
+    const keepRecent = recentProjects;
+    hydrate(content);
+    settings = keepSettings;
+    lang = settings.lang;
+    recentProjects = keepRecent;
+    undoStack.length = 0;
+    redoStack.length = 0;
+    navStack.length = 0;
+    updateBackBtn();
+    selected = null;
+    multiSel.clear();
+    // e. 新ファイルに関連付け(ブラウザは関連付け無しのまま、初期 .bwt をダウンロード)
+    if (TAURI) {
+      bwtSynced = serialize(true); // 書いたばかりなので同期済み
+      setProjPath(path); // 最近使った項目にも載せ、data.json に反映し、タイトルを更新
+    } else {
+      downloadProjectFile(name, content);
+      projPath = null;
+      bwtSynced = undefined;
+      markDirty();
+      updateTitle();
+    }
+    applyTheme(); applyGrid(); applyLang(); applyFontSize(); applyLabelStyle();
+    renderTabs();
+    renderBoard();
+    hint(t('projNewDone', baseName(path ?? name)), 3500);
+  } finally {
+    newProjectBusy = false;
   }
 }
 
@@ -3500,6 +3644,7 @@ function kbShortcuts() {
   const SH = IS_MAC ? '⌘⇧' : 'Ctrl+Shift+';
   return [
     [`${M}N`, t('kbNew')],
+    [`${SH}N`, t('kbNewProj')],
     ['Enter', t('kbEdit')],
     [IS_MAC ? 'Tab / ⇧Tab' : 'Tab / Shift+Tab', t('kbTab')],
     ['← ↑ ↓ →', t('kbArrows')],
@@ -3717,6 +3862,12 @@ addEventListener('keydown', (e) => {
     splitBoxAtCaret();
     return;
   }
+  if (mod && e.shiftKey && (e.key === 'n' || e.key === 'N')) {
+    // ⌘⇧N = 新規プロジェクト(ネイティブメニューが先に消費する環境ではこちらは発火しない。体験版は newProject 側で無効)
+    e.preventDefault();
+    newProject();
+    return;
+  }
   if (mod && (e.key === 'n' || e.key === 'N')) {
     // ⌘S と同様、ネイティブメニュー(⌘N)が先に消費する環境ではこちらは発火しない。
     // 両方発火する環境向けに newBoxShortcut 側で二重発火を抑止している
@@ -3844,6 +3995,7 @@ if (TAURI) {
     if (id === 'new-box') { newBoxShortcut(); return; }    // 集中モード中は「次のボックスへ」として動く
     if (id === 'proj-save') { saveProject(); return; }     // 上書き保存は集中モード中も有効(⌘S の筆癖に応える)
     if (id === 'proj-save-as') { saveProjectAs(); return; }
+    if (id === 'proj-new') { newProject(); return; }     // 集中モード中でも可(自分で確定して閉じる)
     if (focusTarget) return; // 開く/書き出しのダイアログは集中モード中は開かない
     if (id === 'proj-open') openProjectDialog();
     else if (id === 'export-text') openExportDialog();

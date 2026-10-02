@@ -61,6 +61,12 @@ const STR = {
     splitCaretNone: 'カーソル位置の前後にテキストがないため分割できません',
     kbSplitCaret: 'カーソル位置で分割（テキスト編集中）',
     toVert: '縦書きへ', toHorz: '横書きへ',
+    vtAllVert: '縦', vtAllVertT: '選択したテキストボックスをすべて縦書きに',
+    vtAllHorz: '横', vtAllHorzT: '選択したテキストボックスをすべて横書きに',
+    vtAllDone: (n, v) => `${n}個のボックスを${v ? '縦書き' : '横書き'}にしました（重なりは「整列」で整えられます）`,
+    boardVert: 'このボードをすべて縦書き', boardHorz: 'このボードをすべて横書き',
+    boardVtDone: (n, v) => `${n}個のボックスを${v ? '縦書き' : '横書き'}にしました`,
+    boardVtNone: v => `このボードはすでにすべて${v ? '縦書き' : '横書き'}です`,
     close: '✕ 閉じる', closeT: 'キャンバスに戻る（Esc）',
     insertImage: '画像を挿入…',
     imgErr: '画像を読み込めませんでした',
@@ -195,6 +201,12 @@ const STR = {
     splitCaretNone: 'Nothing on one side of the cursor to split',
     kbSplitCaret: 'Split at cursor (while editing)',
     toVert: 'Vertical', toHorz: 'Horizontal',
+    vtAllVert: 'Vert', vtAllVertT: 'Make all selected text boxes vertical',
+    vtAllHorz: 'Horiz', vtAllHorzT: 'Make all selected text boxes horizontal',
+    vtAllDone: (n, v) => `Made ${n} box(es) ${v ? 'vertical' : 'horizontal'} (use Tidy to fix overlaps)`,
+    boardVert: 'Make this board all vertical', boardHorz: 'Make this board all horizontal',
+    boardVtDone: (n, v) => `Made ${n} box(es) ${v ? 'vertical' : 'horizontal'}`,
+    boardVtNone: v => `All boxes on this board are already ${v ? 'vertical' : 'horizontal'}`,
     close: '✕ Close', closeT: 'Back to canvas (Esc)',
     insertImage: 'Insert image…',
     imgErr: 'Could not read the image',
@@ -552,6 +564,11 @@ function applyOp(op, dir) { // dir: 1 = 順方向(redo), -1 = 逆方向(undo)
         b.x = v.x; b.y = v.y;
       }
     });
+  } else if (T === 'vertmulti') { // 縦横の一括切替(複数選択 / ボード全体)。再計測は renderBoard の fitAllBoxes に任せる
+    op.items.forEach(it => {
+      const b = boxById(bd, it.id);
+      if (b) b.vert = dir > 0 ? it.to : it.from;
+    });
   } else if (T === 'color' || T === 'vert' || T === 'link' || T === 'title') {
     const b = boxById(bd, op.id);
     if (b) {
@@ -640,7 +657,7 @@ function applyOp(op, dir) { // dir: 1 = 順方向(redo), -1 = 逆方向(undo)
   }
 
   multiSel.clear();
-  if (T === 'movemulti') {
+  if (T === 'movemulti' || T === 'vertmulti') {
     op.items.forEach(it => { if (boxById(bd, it.id)) multiSel.add(it.id); });
   } else if (T === 'delmulti' || T === 'addmulti') {
     op.items.forEach(it => { if (boxById(bd, it.box.id)) multiSel.add(it.box.id); });
@@ -1412,6 +1429,46 @@ function deleteSelection() {
   markDirty();
 }
 
+// 複数のテキストボックスの向きをまとめて切り替える(1アンドゥ単位 = vertmulti)。すでにその向きの箱と画像は含めない。
+// 位置は動かさず(作者の配置を尊重)、形が変わって生じる重なりは fitAllBoxes の押し出しに任せる。戻り値 = 変えた個数
+function setVertMulti(targets, to) {
+  const bd = board();
+  const items = targets
+    .filter(b => b && b.type === 'text' && !!b.vert !== to)
+    .map(b => ({ id: b.id, from: !!b.vert, to }));
+  if (!items.length) return 0;
+  pushOp({ t: 'vertmulti', board: bd.id, items });
+  items.forEach(it => {
+    const b = boxById(bd, it.id);
+    b.vert = to;
+    const el = $('box' + b.id);
+    if (el) applyBoxAppearance(el, b);
+  });
+  fitAllBoxes(); // 向きが変わると自動軸も変わるので、ボード全体を再計測(伸びた箱は隣を押し出す)
+  updateToolbar();
+  markDirty();
+  return items.length;
+}
+
+// 複数選択の縦横切替: 選択中のテキストボックスが全部縦書きなら横へ、それ以外(全部横 / 混在)は縦へ
+function toggleVertSelection() {
+  const bd = board();
+  const texts = [...multiSel].map(id => boxById(bd, id)).filter(b => b?.type === 'text');
+  if (!texts.length) return;
+  const to = !texts.every(b => b.vert);
+  const n = setVertMulti(texts, to);
+  if (n) hint(t('vtAllDone', n, to), 3500);
+}
+
+// ⚙: 現在のボードのテキストボックスをすべて縦書き / 横書きに(1アンドゥ単位)。編集中・集中モード中なら確定してから
+function setBoardVert(to) {
+  closeMenu();
+  if (focusTarget) closeFocus({ resume: false });
+  if (editing != null) { document.activeElement?.blur(); editing = null; }
+  const n = setVertMulti(board().boxes, to);
+  hint(n ? t('boardVtDone', n, to) : t('boardVtNone', to), 3500);
+}
+
 // 選択中のボックスを読み順に整列する(1アンドゥ単位=movemulti)。
 // 横書き: 左端を揃えて上→下の縦一列 / 全部縦書き: 上端を揃えて右→左の横一行。間隔は FLOW_GAP。
 // 整列後の列が選択外の箱に重なった場合は、通常の成長時と同じ押し出しで逃がす
@@ -1814,7 +1871,7 @@ function toggleFocusShortcut() {
 }
 
 // ================= フローティングツールバー =================
-const tbVert = $('tbVert'), tbDel = $('tbDel');
+const tbVert = $('tbVert'), tbVertAll = $('tbVertAll'), tbDel = $('tbDel');
 let delArmed = 0, delArmedKey = null; // アームは選択集合に紐づける(選択が変わったら無効)
 
 const selKey = () => [...multiSel].sort((a, b) => a - b).join(',');
@@ -1837,9 +1894,14 @@ function updateToolbar() {
   tb.classList.toggle('multi', multi);
   if (multi) {
     $('tbCount').textContent = t('selCount', multiSel.size);
+    const texts = [...multiSel].map(id => boxById(board(), id)).filter(b => b?.type === 'text');
     // 結合はテキストボックスが2つ以上選ばれているときだけ
-    const textCount = [...multiSel].filter(id => boxById(board(), id)?.type === 'text').length;
-    $('tbMerge').hidden = textCount < 2;
+    $('tbMerge').hidden = texts.length < 2;
+    // 縦横の一括切替はテキストボックスがあるときだけ。ラベルは「これから適用する向き」(全部縦書きなら横へ、それ以外は縦へ)
+    tbVertAll.hidden = !texts.length;
+    const toVert = !texts.every(b => b.vert);
+    tbVertAll.textContent = t(toVert ? 'vtAllVert' : 'vtAllHorz');
+    tbVertAll.title = t(toVert ? 'vtAllVertT' : 'vtAllHorzT');
   } else {
     const isImg = b.type === 'image';
     tbVert.hidden = isImg;
@@ -1948,6 +2010,7 @@ $('tbSplit').addEventListener('click', () => {
 $('tbMerge').addEventListener('click', () => mergeSelection());
 
 $('tbArrange').addEventListener('click', () => arrangeSelection());
+tbVertAll.addEventListener('click', () => toggleVertSelection());
 
 tbDel.addEventListener('click', () => {
   const bd = board();
@@ -2448,6 +2511,8 @@ $('setBtn').addEventListener('click', (e) => {
     { label: t('insertImage'), action: () => imgInput.click() },
     { label: t('aiGuideMenu'), action: () => copyAiGuide() },
     { label: t('kbMenu'), action: () => openShortcutsDialog() },
+    { label: t('boardVert'), action: () => setBoardVert(true) },
+    { label: t('boardHorz'), action: () => setBoardVert(false) },
     { label: t('gridShow'), check: settings.grid, action: () => { settings.grid = !settings.grid; applyGrid(); markDirty(); } },
     { header: t('labelStyleLabel') },
     { label: t('labelPattern'), check: check(settings.labelStyle === 'pattern'), action: () => setLabelStyle('pattern') },

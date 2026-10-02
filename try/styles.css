@@ -403,9 +403,10 @@ button { font-family: inherit; }
 #toolbar .tbtn.danger:hover { background: color-mix(in oklab, var(--danger) 10%, var(--card-bg)); color: var(--danger); }
 #toolbar .tbtn.danger.armed { background: var(--danger); color: #FFFFFF; }
 #toolbar .sep { width: 1px; height: 15px; background: var(--hairline); margin: 0 3px; }
-/* 複数選択時は「N個選択 + 整列 + 結合 + 削除」だけのミニツールバー */
-#toolbar.multi > :not(#tbCount):not(#tbArrange):not(#tbMerge):not(#tbDel) { display: none; }
+/* 複数選択時は「N個選択 + 縦/横 + 整列 + 結合 + 削除」だけのミニツールバー */
+#toolbar.multi > :not(#tbCount):not(#tbVertAll):not(#tbArrange):not(#tbMerge):not(#tbDel) { display: none; }
 #toolbar:not(.multi) #tbCount { display: none; }
+#toolbar:not(.multi) #tbVertAll { display: none; }
 #toolbar:not(.multi) #tbArrange { display: none; }
 #toolbar:not(.multi) #tbMerge { display: none; }
 #tbCount { font-size: 11px; color: var(--ink-muted); padding: 0 8px; white-space: nowrap; }

@@ -6,6 +6,8 @@
 const TAURI = window.__TAURI__ || null;
 // Web 体験版(web-demo/demo.js)が本体の読み込み前に立てるフラグ。無いとき(アプリ版)は何も変えない
 const DEMO = window.BW_DEMO || null;
+// このウィンドウ(Tauri)。ウィンドウ宛てのイベント(menu / close-requested)はここで聞く
+const winApi = TAURI ? (TAURI.webviewWindow?.getCurrentWebviewWindow?.() ?? null) : null;
 const persist = TAURI ? {
   load: () => TAURI.core.invoke('load_state'),
   save: (data) => TAURI.core.invoke('save_state', { data }),
@@ -118,6 +120,7 @@ const STR = {
     projNewConfirmBtn: '保存して続ける',
     projNewDone: n => `新しいプロジェクトを作成しました: ${n}`,
     projNewBoard: '無題',
+    projOpenElsewhere: 'そのファイルは別のウィンドウで開いています',
     recentLabel: '最近使ったプロジェクト',
     projDefaultName: n => `プロジェクト ${n}`,
     projSaved: n => `保存しました: ${n}`,
@@ -265,6 +268,7 @@ const STR = {
     projNewConfirmBtn: 'Save & continue',
     projNewDone: n => `Created a new project: ${n}`,
     projNewBoard: 'Untitled',
+    projOpenElsewhere: 'That file is open in another window',
     recentLabel: 'Recent Projects',
     projDefaultName: n => `Project ${n}`,
     projSaved: n => `Saved: ${n}`,
@@ -347,20 +351,26 @@ let boards = [];
 let cur = 0;
 const FONT_SIZES = [13, 15, 17, 19]; // 小 / 標準 / 大 / 特大
 let settings = { lang: 'ja', theme: 'system', grid: true, fontSize: 15, labelStyle: 'pattern' };
-// 現在のプロジェクト(.bwt)のパス。⌘S(上書き保存)の書き込み先。
-// data.json には保存して再起動後も引き継ぐが、.bwt 自体には埋め込まない
+// このウィンドウが関連付いている .bwt のパス(Tauri: 起動時に window_binding で受け取る)。
+// 関連付いたウィンドウの自動保存はその .bwt 自体に書く。null = 未関連付け(main のみ。従来どおり data.json)。
+// ブラウザ検証では常に null(保存は localStorage、.bwt はダウンロード)
 let projPath = null;
-// 最近使ったプロジェクト(.bwt のパス、新しい順・最大8件)。
-// data.json のみに保存し、.bwt には書かない(原稿ファイルにローカルパスを漏らさない)
+// 最近使ったプロジェクト(.bwt のパス、新しい順・最大8件)。全ウィンドウで共有(Tauri: recent.json)。
+// .bwt には書かない(原稿ファイルにローカルパスを漏らさない)
 let recentProjects = [];
 const RECENT_MAX = 8;
+const normalizeRecent = (r) => (Array.isArray(r) ? r.filter(x => typeof x === 'string' && x).slice(0, RECENT_MAX) : []);
 function noteRecent(p) {
   if (!p) return;
   recentProjects = [p, ...recentProjects.filter(x => x !== p)].slice(0, RECENT_MAX);
+  saveRecent();
 }
-// projPath の .bwt に最後に書いた/読んだ内容。タイトルの「● 未保存」判定に使う。
-// undefined = まだ不明(起動直後など。● は出さない) / null = 乖離が確定している
-let bwtSynced;
+// 最近使った項目を共有ストアへ(他のウィンドウには recent-changed で届く)。ブラウザ検証では状態に埋め込む
+async function saveRecent() {
+  if (!TAURI) { markDirty(); return; }
+  try { await TAURI.core.invoke('save_recent', { data: JSON.stringify(recentProjects) }); }
+  catch (e) { console.error('recent save failed', e); }
+}
 const baseName = p => p.split(/[\\/]/).pop(); // Windows のパス区切り(\)にも対応
 const board = () => boards[cur];
 const boardById = (id) => boards.find(b => b.id === id);
@@ -368,13 +378,27 @@ const boxById = (bd, id) => bd.boxes.find(b => b.id === id);
 
 const clampScale = s => Math.min(3, Math.max(0.05, s));
 
-// forProject=true は .bwt 書き出し用: パス情報(projPath/recent)をファイルに埋め込まない
+// 保存する JSON(.bwt / data.json / localStorage は同じ形式)。
+// Tauri では settings / recent は共有ストアに移ったので状態にパス情報は埋め込まない(settings は形式維持のため埋め込む)。
+// ブラウザ検証(TAURI 無し)は従来どおり localStorage に projPath / recent も同居させる。forProject=true は .bwt 書き出し用
 const serialize = (forProject = false) => {
-  if (forProject) return JSON.stringify({ version: 1, settings, cur, boards });
+  if (forProject || TAURI) return JSON.stringify({ version: 1, settings, cur, boards });
   const d = { version: 1, settings, cur, boards };
   if (projPath != null) d.projPath = projPath;
   if (recentProjects.length) d.recent = recentProjects;
   return JSON.stringify(d);
+};
+
+// 設定の形を整える(不正値は既定に)
+const normalizeSettings = (s) => {
+  s = s || {};
+  return {
+    lang: s.lang === 'en' ? 'en' : 'ja',
+    theme: ['light', 'dark', 'system'].includes(s.theme) ? s.theme : 'system',
+    grid: s.grid !== false,
+    fontSize: FONT_SIZES.includes(+s.fontSize) ? +s.fontSize : 15,
+    labelStyle: s.labelStyle === 'color' ? 'color' : 'pattern', // ラベルの描き方（既定=模様。データの色名はそのまま）
+  };
 };
 
 function hydrate(json) {
@@ -409,18 +433,12 @@ function hydrate(json) {
     },
   }));
   cur = Math.min(Math.max(0, d.cur | 0), boards.length - 1);
-  projPath = typeof d.projPath === 'string' && d.projPath ? d.projPath : null;
-  recentProjects = Array.isArray(d.recent)
-    ? d.recent.filter(x => typeof x === 'string' && x).slice(0, RECENT_MAX)
-    : [];
-  const s = d.settings || {};
-  settings = {
-    lang: s.lang === 'en' ? 'en' : 'ja',
-    theme: ['light', 'dark', 'system'].includes(s.theme) ? s.theme : 'system',
-    grid: s.grid !== false,
-    fontSize: FONT_SIZES.includes(+s.fontSize) ? +s.fontSize : 15,
-    labelStyle: s.labelStyle === 'color' ? 'color' : 'pattern', // ラベルの描き方（既定=模様。データの色名はそのまま）
-  };
+  if (!TAURI) {
+    // ブラウザ検証: 従来どおり状態に同居した関連付けと最近使った項目を読む(Tauri では共有ストアが正)
+    projPath = typeof d.projPath === 'string' && d.projPath ? d.projPath : null;
+    recentProjects = normalizeRecent(d.recent);
+  }
+  settings = normalizeSettings(d.settings);
   uid = boards.flatMap(b => b.boxes).reduce((m, b) => Math.max(m, b.id | 0), 0) + 1;
   bid = boards.reduce((m, b) => Math.max(m, b.id | 0), 0) + 1;
 }
@@ -462,7 +480,6 @@ async function flushSave() {
     saveInFlight = null;
   }
   if (dirty) return saveFailed ? false : flushSave(); // 保存中に入った編集を追いフラッシュ
-  updateTitle(); // .bwt 未保存ドット(●)を自動保存のタイミングで再判定
   return true;
 }
 
@@ -2528,7 +2545,7 @@ $('setBtn').addEventListener('click', (e) => {
     { label: t('kbMenu'), action: () => openShortcutsDialog() },
     { label: t('boardVert'), action: () => setBoardVert(true) },
     { label: t('boardHorz'), action: () => setBoardVert(false) },
-    { label: t('gridShow'), check: settings.grid, action: () => { settings.grid = !settings.grid; applyGrid(); markDirty(); } },
+    { label: t('gridShow'), check: settings.grid, action: () => { settings.grid = !settings.grid; applyGrid(); saveSettings(); } },
     { header: t('labelStyleLabel') },
     { label: t('labelPattern'), check: check(settings.labelStyle === 'pattern'), action: () => setLabelStyle('pattern') },
     { label: t('labelColor'), check: check(settings.labelStyle === 'color'), action: () => setLabelStyle('color') },
@@ -2548,14 +2565,21 @@ $('setBtn').addEventListener('click', (e) => {
   const r = e.currentTarget.getBoundingClientRect();
   showMenu(r.right, r.bottom + 8, items, { alignRight: true });
 });
-function setTheme(v) { settings.theme = v; applyTheme(); markDirty(); }
-function setLabelStyle(v) { settings.labelStyle = v; applyLabelStyle(); markDirty(); }
-function setLang(l) { settings.lang = l; applyLang(); markDirty(); }
+// 設定は全ウィンドウで共有(Tauri: settings.json。保存すると他のウィンドウにも settings-changed で届く)。
+// 状態(.bwt / data.json)にも形式維持のため埋め込むので markDirty も行う
+function saveSettings() {
+  markDirty();
+  if (!TAURI) return;
+  TAURI.core.invoke('save_settings', { data: JSON.stringify(settings) }).catch(e => console.error('settings save failed', e));
+}
+function setTheme(v) { settings.theme = v; applyTheme(); saveSettings(); }
+function setLabelStyle(v) { settings.labelStyle = v; applyLabelStyle(); saveSettings(); }
+function setLang(l) { settings.lang = l; applyLang(); saveSettings(); }
 function setFontSize(n) {
   settings.fontSize = n;
   applyFontSize();
   fitAllBoxes(); // 文字サイズが変わると必要な高さ/幅も変わる
-  markDirty();
+  saveSettings();
 }
 
 // ================= 検索 (P1-4) =================
@@ -3006,21 +3030,19 @@ overlayEl.addEventListener('mousedown', (e) => { if (e.target === overlayEl) clo
 // 全ボード・接続・リンク・表示位置を丸ごと1ファイルに保存/復元する
 const BWT_FILTER = [{ name: 'Bird Writer Project', extensions: ['bwt'] }];
 
-// プロジェクトの関連付けを更新し、ウィンドウタイトルに反映する
-function setProjPath(p) {
-  projPath = p || null;
-  noteRecent(projPath);
-  markDirty(); // 関連付けを data.json に永続化(再起動後も ⌘S で同じファイルへ)
+// このウィンドウを .bwt に関連付ける(別名で保存 / 未関連付け main の初回保存)。以後の自動保存はその .bwt へ。
+// 最近使った項目にも載せ、タイトルに反映する
+async function bindWindow(p) {
+  await TAURI.core.invoke('bind_window', { path: p });
+  projPath = p;
+  noteRecent(p);
   updateTitle();
 }
-// .bwt に書き出していない変更があるか(⌘S 関連付けがあるときだけ意味を持つ)
-function bwtDirty() {
-  return projPath != null && bwtSynced !== undefined && bwtSynced !== serialize(true);
-}
 let lastTitle = null;
+// タイトル = 関連付いたファイル名(未関連付けは「Bird Writer」)
 function updateTitle() {
   const name = projPath ? baseName(projPath).replace(/\.bwt$/i, '') : null;
-  const title = name ? `${bwtDirty() ? '● ' : ''}${name} — Bird Writer` : 'Bird Writer';
+  const title = name ? `${name} — Bird Writer` : 'Bird Writer';
   if (title === lastTitle) return; // setTitle の IPC を変化時だけに抑える
   lastTitle = title;
   if (TAURI) {
@@ -3041,11 +3063,10 @@ async function chooseProjectPath(defaultPath) {
     : await TAURI.core.invoke('plugin:dialog|save', { options });
   return path || null;
 }
-// .bwt を書き、そのファイルを以後の ⌘S の上書き先にする(Tauri。別名で保存 / 新規プロジェクト 共通)
+// .bwt を書き、このウィンドウをそのファイルに関連付ける(Tauri。別名で保存 / 未関連付け main の ⌘S)
 async function writeProjectFile(path, content) {
   await TAURI.core.invoke('write_text_file', { path, content });
-  bwtSynced = content;
-  setProjPath(path);
+  await bindWindow(path);
 }
 // ブラウザ検証用: .bwt をダウンロードとして保存する(関連付けは付かない)
 function downloadProjectFile(name, content) {
@@ -3056,7 +3077,7 @@ function downloadProjectFile(name, content) {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-// ⌘⇧S: 保存先を選んで書き出し、以後そのファイルを ⌘S の上書き先にする。
+// ⌘⇧S: 保存先を選んで書き出し、以後このウィンドウはそのファイルに関連付く(自動保存もそこへ)。
 // 戻り値 = 保存先(ブラウザはファイル名)。キャンセル / 失敗は null(失敗はヒント表示済み)
 async function saveProjectAs() {
   closeMenu();
@@ -3076,45 +3097,20 @@ async function saveProjectAs() {
     return name;
   } catch (e) {
     console.error('project save failed', e);
-    hint(t('saveErr') + '：' + String(e?.message ?? e).slice(0, 120), 6000);
+    if (String(e?.message ?? e).includes('open-elsewhere')) hint(t('projOpenElsewhere'), 4000);
+    else hint(t('saveErr') + '：' + String(e?.message ?? e).slice(0, 120), 6000);
     return null;
   }
 }
 
-// ⌘S: 現在のプロジェクトファイルへ黙って上書き保存。
-// 関連付けが無い(または書けない=サンドボックスの権限切れ等)場合は「別名で保存」へフォールバック
+// ⌘S: 関連付いたウィンドウでは「今すぐ書く」(自動保存のデバウンスを待たずに .bwt へフラッシュ)。
+// 未関連付け(main の初回 / ブラウザ検証)は「別名で保存」へ
 async function saveProject() {
   closeMenu();
   if (!TAURI || projPath == null) return saveProjectAs();
-  await flushSave();
-  try {
-    const content = serialize(true);
-    await TAURI.core.invoke('write_text_file', { path: projPath, content });
-    bwtSynced = content;
-    updateTitle(); // ● を消す
-    hint(t('projSaved', baseName(projPath)), 2200);
-  } catch (e) {
-    console.error('project overwrite failed, falling back to save-as', e);
-    return saveProjectAs();
-  }
-}
-
-// 関連付け済みの .bwt へ黙って上書きする(新規プロジェクトの前に、いまの作品を守る)。
-// ⌘S と違い、失敗しても別名保存へは流れず false を返す(ヒント表示済み)
-async function overwriteProject() {
-  if (!TAURI || projPath == null) return true;
-  await flushSave();
-  try {
-    const content = serialize(true);
-    await TAURI.core.invoke('write_text_file', { path: projPath, content });
-    bwtSynced = content;
-    updateTitle();
-    return true;
-  } catch (e) {
-    console.error('project overwrite failed', e);
-    hint(t('saveErr') + '：' + String(e?.message ?? e).slice(0, 120), 6000);
-    return false;
-  }
+  const ok = await flushSave();
+  if (ok) hint(t('projSaved', baseName(projPath)), 2200);
+  else hint(t('saveErr'), 4000);
 }
 
 // ワークスペースに作品があるか(初期状態 = ボード1枚・初期名・ボックス0 以外は「ある」)
@@ -3125,90 +3121,90 @@ function hasContent() {
   return b.boxes.length > 0 || !defaults.includes(b.name);
 }
 
-// ⌘⇧N / ⚙「新規プロジェクト…」: 作品ごとに別の .bwt で並行して書けるように、
-// ワークスペースを空にして新しい .bwt に関連付ける。順序:
-//  a. 編集の確定(開くと同じ作法) → b. いまの作品を守る(関連付けありで未保存なら黙って上書き /
-//  関連付け無しで内容があれば確認して別名で保存) → c. 新ファイルの保存先を選ぶ(キャンセルで中止) →
-//  f. 強制バックアップ → 新ファイルを書く → d. 空にする(settings と最近使った項目は引き継ぐ) → e. 関連付け。
-// ブラウザ検証では保存ダイアログがダウンロードになるので、空にしたあと新プロジェクトの初期 .bwt をダウンロードし、関連付けは付かない
+// 空のプロジェクト(今の設定を引き継ぐ)の JSON
+const emptyProjectJson = () => JSON.stringify({ version: 1, settings, cur: 0, boards: [{ id: 1, name: t('projNewBoard'), boxes: [], conns: [], view: { x: 60, y: 80, s: 1 } }] });
+
+// ⌘⇧N / ⚙「新規プロジェクト…」(Tauri): 保存先を選び、空の .bwt を書いて、それを開く新しいウィンドウを作る。
+// いまのウィンドウは触らない(作品ごとにウィンドウを並べて書ける)。ブラウザ検証は従来どおり今の画面を置き換える
 let newProjectBusy = false;
 async function newProject() {
   closeMenu();
   if (DEMO?.noOpen) { hint(t('demoNoOpen'), 3500); return; } // 体験版: 開くと同様に無効
+  if (!TAURI) return newProjectInPlace();
   if (newProjectBusy) return; // ネイティブメニューと keydown の両方が発火する環境での二重起動を防ぐ
   newProjectBusy = true;
   try {
-    // a. 編集中・集中モード・検索パネルは確定 / 閉じる
-    closeFocus({ resume: false });
-    closeSearch();
-    endConnect();
-    endLinkPick(true);
-    if (editing != null) { document.activeElement?.blur(); editing = null; }
-    // b. いまの作品を守る
-    if (projPath != null) {
-      if (bwtDirty() && !(await overwriteProject())) return;
-    } else if (hasContent()) {
-      const go = await showConfirm(t('projNewConfirmTitle'), t('projNewConfirmBody'), t('projNewConfirmBtn'));
-      if (!go) return;
-      if (!(await saveProjectAs())) return; // キャンセル / 失敗なら中止
+    let path;
+    try { path = await chooseProjectPath(defaultProjName()); }
+    catch (e) {
+      console.error('new project dialog failed', e);
+      hint(t('saveErr') + '：' + String(e?.message ?? e).slice(0, 120), 6000);
+      return;
     }
-    // c. 新しいプロジェクトの保存先(別名で保存と同じダイアログ)
-    const name = defaultProjName();
-    let path = null;
-    if (TAURI) {
-      try { path = await chooseProjectPath(name); }
-      catch (e) {
-        console.error('new project dialog failed', e);
-        hint(t('saveErr') + '：' + String(e?.message ?? e).slice(0, 120), 6000);
-        return;
-      }
-      if (!path) return;
+    if (!path) return;
+    try { await TAURI.core.invoke('write_text_file', { path, content: emptyProjectJson() }); }
+    catch (e) {
+      console.error('new project write failed', e);
+      hint(t('saveErr') + '：' + String(e?.message ?? e).slice(0, 120), 6000);
+      return;
     }
-    // f. 置き換え直前に現在の状態を保存 + 強制バックアップ(b で保存していても念のため)。できなければ中止
-    if (!(await guardDestructive())) { hint(t('guardErr'), 5000); return; }
-    // 空のワークスペース(今の設定を引き継ぐ)。先に内容を確定しておき、書き込みに失敗したら今の作品を触らずに中止する
-    const content = JSON.stringify({ version: 1, settings, cur: 0, boards: [{ id: 1, name: t('projNewBoard'), boxes: [], conns: [], view: { x: 60, y: 80, s: 1 } }] });
-    if (TAURI) {
-      try { await TAURI.core.invoke('write_text_file', { path, content }); }
-      catch (e) {
-        console.error('new project write failed', e);
-        hint(t('saveErr') + '：' + String(e?.message ?? e).slice(0, 120), 6000);
-        return;
-      }
-    }
-    // d. ワークスペースを空に(hydrate で採番 uid / bid もリセットされる)。settings と最近使った項目は引き継ぐ
-    const keepSettings = { ...settings };
-    const keepRecent = recentProjects;
-    hydrate(content);
-    settings = keepSettings;
-    lang = settings.lang;
-    recentProjects = keepRecent;
-    undoStack.length = 0;
-    redoStack.length = 0;
-    navStack.length = 0;
-    updateBackBtn();
-    selected = null;
-    multiSel.clear();
-    // e. 新ファイルに関連付け(ブラウザは関連付け無しのまま、初期 .bwt をダウンロード)
-    if (TAURI) {
-      bwtSynced = serialize(true); // 書いたばかりなので同期済み
-      setProjPath(path); // 最近使った項目にも載せ、data.json に反映し、タイトルを更新
-    } else {
-      downloadProjectFile(name, content);
-      projPath = null;
-      bwtSynced = undefined;
-      markDirty();
-      updateTitle();
-    }
-    applyTheme(); applyGrid(); applyLang(); applyFontSize(); applyLabelStyle();
-    renderTabs();
-    renderBoard();
-    hint(t('projNewDone', baseName(path ?? name)), 3500);
+    if (await openInWindow(path)) hint(t('projNewDone', baseName(path)), 3500);
   } finally {
     newProjectBusy = false;
   }
 }
 
+// ブラウザ検証(TAURI 無し)の新規プロジェクト: 保存ダイアログが無いので、内容があれば確認していまの作品を .bwt として
+// ダウンロードしてから、今の画面を空にして新プロジェクトの初期 .bwt をダウンロードする(関連付けは付かない)
+async function newProjectInPlace() {
+  closeFocus({ resume: false });
+  closeSearch();
+  endConnect();
+  endLinkPick(true);
+  if (editing != null) { document.activeElement?.blur(); editing = null; }
+  if (hasContent()) {
+    const go = await showConfirm(t('projNewConfirmTitle'), t('projNewConfirmBody'), t('projNewConfirmBtn'));
+    if (!go) return;
+    if (!(await saveProjectAs())) return; // キャンセル / 失敗なら中止
+  }
+  if (!(await guardDestructive())) { hint(t('guardErr'), 5000); return; }
+  const name = defaultProjName();
+  const content = emptyProjectJson();
+  const keepSettings = { ...settings };
+  const keepRecent = recentProjects;
+  hydrate(content);
+  settings = keepSettings;
+  lang = settings.lang;
+  recentProjects = keepRecent;
+  undoStack.length = 0;
+  redoStack.length = 0;
+  navStack.length = 0;
+  updateBackBtn();
+  selected = null;
+  multiSel.clear();
+  downloadProjectFile(name, content);
+  projPath = null;
+  markDirty();
+  updateTitle();
+  applyTheme(); applyGrid(); applyLang(); applyFontSize(); applyLabelStyle();
+  renderTabs();
+  renderBoard();
+  hint(t('projNewDone', name), 3500);
+}
+
+// .bwt を新しいウィンドウで開く(Tauri。既に開いていればそのウィンドウを前面へ)。今のウィンドウは置き換えない。戻り値 = 開けたか
+async function openInWindow(path) {
+  try {
+    await TAURI.core.invoke('open_project_window', { path });
+    return true;
+  } catch (e) {
+    console.error('open window failed', e);
+    hint(t('projOpenErr'), 4000);
+    return false;
+  }
+}
+
+// ⌘O: Tauri では選んだ .bwt を新しいウィンドウで開く(今のウィンドウは置き換えない)。ブラウザ検証は今の画面を置き換える
 async function openProjectDialog() {
   closeMenu();
   try {
@@ -3219,7 +3215,7 @@ async function openProjectDialog() {
         : await TAURI.core.invoke('plugin:dialog|open', { options });
       if (!sel) return;
       const path = Array.isArray(sel) ? sel[0] : sel;
-      await importProjectFromPath(path);
+      await openInWindow(path);
     } else {
       const inp = document.createElement('input');
       inp.type = 'file';
@@ -3236,32 +3232,18 @@ async function openProjectDialog() {
   }
 }
 
-// 戻り値: ファイルを読めたら true(形式不備やキャンセルでも true。false = 読めない/消えている)
-async function importProjectFromPath(path) {
-  let s;
-  try {
-    s = await TAURI.core.invoke('read_text_file', { path });
-  } catch (e) {
-    console.error('project read failed', e);
-    hint(t('projOpenErr'), 4000);
-    return false;
-  }
-  await importProject(s, baseName(path), path);
-  return true;
-}
-
-// 最近使ったプロジェクトから開く。ファイルが消えていたらリストから外す
+// 最近使ったプロジェクトを新しいウィンドウで開く(既に開いていれば前面へ)。ファイルが消えていたらリストから外す
 async function openRecent(p) {
   closeMenu();
   if (!TAURI) { hint(t('projOpenErr'), 3000); return; } // ブラウザ検証ではパスを開けない
-  const ok = await importProjectFromPath(p);
-  if (!ok) {
+  if (!(await openInWindow(p))) {
     recentProjects = recentProjects.filter(x => x !== p);
-    markDirty();
+    saveRecent();
   }
 }
 
-async function importProject(json, displayName, path = null) {
+// ブラウザ検証用: 選んだ .bwt で今の画面を置き換える(Tauri では新しいウィンドウで開くので使わない)
+async function importProject(json, displayName) {
   // 置き換え前に形式を検証
   try {
     const d = JSON.parse(json);
@@ -3300,10 +3282,7 @@ async function importProject(json, displayName, path = null) {
   navStack.length = 0;
   updateBackBtn();
   selected = null;
-  projPath = (TAURI && path) ? path : null; // 開いたファイルを以後の ⌘S の上書き先に
-  noteRecent(projPath);
-  // 開いた直後は同期済み扱い(自前の正規化シリアライズと比較するため、外部整形の差は無視される)
-  bwtSynced = projPath != null ? serialize(true) : undefined;
+  projPath = null; // ブラウザ検証ではファイルの関連付けは付かない
   updateTitle();
   applyTheme(); applyGrid(); applyLang(); applyFontSize(); applyLabelStyle();
   renderTabs();
@@ -3422,7 +3401,6 @@ async function runRestore(name) {
   updateBackBtn();
   multiSel.clear();
   selected = null;
-  bwtSynced = projPath != null ? null : undefined; // 復元直後は .bwt と乖離している前提で ● を出す
   updateTitle();
   applyTheme(); applyGrid(); applyLang(); applyFontSize(); applyLabelStyle();
   renderTabs();
@@ -3512,11 +3490,14 @@ ${SCHEMA}
 
 ## Safe workflow
 
-1. In Bird Writer: **Save As… (${SH}S)** to a place you can reach, e.g. ~/Documents/mynovel.bwt
-2. You edit that file and save it as valid JSON.
-3. In Bird Writer: **Open project… (${M}O)** and choose the file.
+Each Bird Writer window is one .bwt file, and the window **auto-saves into that file** while it is open.
 
-⚠️ **While you are editing the file, I must not press ${M}S in Bird Writer** — it would overwrite your changes. Opening the edited file automatically backs up the previous state first, so mistakes can be recovered.
+1. In Bird Writer: **Save As… (${SH}S)** to a place you can reach, e.g. ~/Documents/mynovel.bwt — from then on that window auto-saves there.
+2. **I close that window** (or quit Bird Writer) before handing the file to you, and keep it closed while you edit.
+3. You edit the file and save it as valid JSON.
+4. I open it again with **Open project… (${M}O)** or from Recent Projects (it opens in its own window).
+
+⚠️ **While you are editing the file, its window must stay closed** — an open window would auto-save over your changes. The app keeps generation backups of each file, so a mistake can still be recovered.
 
 If I only want you to read the manuscript, exporting to .txt from the app (${M}E) is simpler — but layout information is lost.`;
   }
@@ -3557,11 +3538,14 @@ ${SCHEMA}
 
 ## 安全な進め方
 
-1. Bird Writer で **「別名で保存…」（${SH}S）** して、あなたがアクセスできる場所に置く（例: ~/Documents/作品名.bwt）
-2. あなたがそのファイルを編集し、妥当な JSON として保存する
-3. Bird Writer で **「プロジェクトを開く…」（${M}O）** から読み込む
+Bird Writer は1ウィンドウ＝1つの .bwt で、ウィンドウを開いている間は**そのファイルに自動保存**します。
 
-⚠️ **あなたが編集している間、私は Bird Writer で ${M}S（上書き保存）を押しません** — 押すとあなたの編集が消えてしまうためです。読み込み時は直前の状態が自動でバックアップされるので、失敗しても復元できます。
+1. Bird Writer で **「別名で保存…」（${SH}S）** して、あなたがアクセスできる場所に置く（例: ~/Documents/作品名.bwt）。以後そのウィンドウはそこへ自動保存します
+2. ファイルを渡す前に、**私はそのウィンドウを閉じます**（またはアプリを終了します）。あなたが編集している間は閉じたままにします
+3. あなたがそのファイルを編集し、妥当な JSON として保存する
+4. 私が **「プロジェクトを開く…」（${M}O）** か「最近使ったプロジェクト」から開き直す（そのファイルのウィンドウとして開きます）
+
+⚠️ **あなたが編集している間、そのファイルのウィンドウは閉じておきます** — 開いたままだと自動保存があなたの編集を上書きしてしまうためです。アプリはファイルごとに世代バックアップを残しているので、編集ミスがあっても復元できます。
 
 原稿を読んでもらうだけなら、アプリの「書き出し…（${M}E）」で .txt にする方が手軽です（ただしレイアウト情報は失われます）。`;
 }
@@ -3973,24 +3957,35 @@ document.addEventListener('visibilitychange', () => { if (document.visibilitySta
 addEventListener('beforeunload', () => { flushSave(); });
 
 if (TAURI) {
-  // ウィンドウを閉じる / アプリ終了時: Rust 側が閉じるのを保留し、保存完了後に確定。
+  // ウィンドウ宛てのイベントはこのウィンドウのラベル宛てだけを聞く(他のウィンドウ宛ては受け取らない)
+  const listenHere = (name, cb) => (winApi ? winApi.listen(name, cb) : TAURI.event.listen(name, cb));
+  // このウィンドウを閉じる / アプリ終了時: Rust 側が閉じるのを保留し、保存完了後に確定(他のウィンドウは影響なし)。
   // まず ack_close で「JS は応答している」と伝えてタイムアウト強制クローズを解除し、
   // 最終保存に失敗した場合は黙って破棄せずユーザーに選ばせる (#1)
-  TAURI.event.listen('close-requested', async () => {
+  listenHere('close-requested', async () => {
     TAURI.core.invoke('ack_close').catch(() => {});
     let ok = false;
     try { ok = await flushSave(); } catch (e) { console.error(e); }
     if (ok) { TAURI.core.invoke('confirm_close'); return; }
     const quit = await showConfirm(t('closeFailTitle'), t('closeFailBody'), t('closeFailBtn'));
-    if (quit) TAURI.core.invoke('confirm_close');
+    TAURI.core.invoke(quit ? 'confirm_close' : 'cancel_close').catch(() => {});
   });
-  // 実行中に Finder で .bwt が開かれたとき
-  TAURI.event.listen('open-project', (e) => {
-    TAURI.core.invoke('take_pending_open').catch(() => {}); // 二重処理防止に消費
-    if (typeof e.payload === 'string') importProjectFromPath(e.payload);
+  // 設定と最近使った項目は全ウィンドウで共有: 他のウィンドウでの変更を反映する
+  TAURI.event.listen('settings-changed', (e) => {
+    let next;
+    try { next = normalizeSettings(JSON.parse(e.payload)); } catch (err) { return; }
+    if (JSON.stringify(next) === JSON.stringify(settings)) return;
+    settings = next;
+    lang = settings.lang;
+    applyTheme(); applyGrid(); applyLabelStyle(); applyLang(); applyFontSize();
+    fitAllBoxes();
+    markDirty(); // 状態に埋め込んだ設定も揃える
   });
-  // ネイティブメニュー(ファイル)からの操作
-  TAURI.event.listen('menu', (e) => {
+  TAURI.event.listen('recent-changed', (e) => {
+    try { recentProjects = normalizeRecent(JSON.parse(e.payload)); } catch (err) { /* ignore */ }
+  });
+  // ネイティブメニュー(ファイル)からの操作(Rust がフォーカス中のウィンドウへ送る)
+  listenHere('menu', (e) => {
     const id = e.payload;
     if (id === 'new-box') { newBoxShortcut(); return; }    // 集中モード中は「次のボックスへ」として動く
     if (id === 'proj-save') { saveProject(); return; }     // 上書き保存は集中モード中も有効(⌘S の筆癖に応える)
@@ -4004,9 +3999,15 @@ if (TAURI) {
 
 // ================= 起動 =================
 async function boot() {
-  let loaded = false, damaged = false, raw = null;
+  let loaded = false, damaged = false, raw = null, sharedSettings = null;
+  if (TAURI) {
+    // このウィンドウの関連付け(.bwt)と、全ウィンドウ共有の設定 / 最近使った項目
+    try { projPath = (await TAURI.core.invoke('window_binding')) || null; } catch (e) { console.error('window_binding failed', e); }
+    try { const sj = await TAURI.core.invoke('load_settings'); if (sj) sharedSettings = normalizeSettings(JSON.parse(sj)); } catch (e) { console.error('settings load failed', e); }
+    try { const rj = await TAURI.core.invoke('load_recent'); if (rj) recentProjects = normalizeRecent(JSON.parse(rj)); } catch (e) { console.error('recent load failed', e); }
+  }
   try {
-    raw = await persist.load();
+    raw = await persist.load(); // 関連付いたウィンドウは .bwt、未関連付けの main は data.json(Rust が振り分ける)
     if (raw) { hydrate(raw); loaded = true; }
   } catch (e) {
     console.error('load failed', e);
@@ -4017,25 +4018,14 @@ async function boot() {
     boards = [newBoard(STR.ja.boardN(1))];
     cur = 0;
   }
+  if (sharedSettings) settings = sharedSettings; // 共有ストアが正(.bwt / data.json に埋め込まれた設定より優先)
   applyTheme();
   applyGrid();
   applyLabelStyle();
   applyLang();
   applyFontSize();
-  updateTitle(); // 前回のプロジェクト関連付けがあればタイトルに反映
-  // ⌘S 関連付けがあるなら .bwt を読み比べて ● の初期状態を決める
-  // (読み込み中に別プロジェクトへ切り替わった場合は反映しない)
-  if (projPath != null) {
-    if (TAURI) {
-      const p0 = projPath;
-      TAURI.core.invoke('read_text_file', { path: p0 })
-        .then(s => { if (projPath === p0) { bwtSynced = s; updateTitle(); } })
-        .catch(() => { if (projPath === p0) { bwtSynced = null; updateTitle(); } });
-    } else {
-      bwtSynced = null; // ブラウザ検証では .bwt を読めないため常に「未保存」扱い
-      updateTitle();
-    }
-  }
+  updateTitle(); // 関連付いたファイル名をタイトルに
+  if (TAURI && projPath != null) noteRecent(projPath); // 開いたファイルを最近使った項目の先頭へ(全ウィンドウ共有)
   renderTabs();
   renderBoard();
   if (damaged) {
@@ -4055,13 +4045,6 @@ async function boot() {
     // 旧形式データ(色名など)のマイグレーション結果も永続化する
     markDirty();
     if (!loaded) hint(t('welcome'), 5000);
-  }
-  // .bwt ダブルクリック起動(コールドスタート)の処理
-  if (TAURI) {
-    try {
-      const pending = await TAURI.core.invoke('take_pending_open');
-      if (pending) await importProjectFromPath(pending);
-    } catch (e) { console.error(e); }
   }
 }
 

@@ -362,7 +362,8 @@ let cur = 0;
 const FONT_SIZES = [13, 15, 17, 19]; // 小 / 標準 / 大 / 特大
 let settings = { lang: 'ja', theme: 'system', grid: true, fontSize: 15, labelStyle: 'pattern' };
 // このウィンドウが関連付いている .bwt のパス(Tauri: 起動時に window_binding で受け取る)。
-// 関連付いたウィンドウの自動保存はその .bwt 自体に書く。null = 未関連付け(main のみ。従来どおり data.json)。
+// 関連付いたウィンドウの自動保存はその .bwt 自体に書く。Tauri では常に関連付いている(作品はライブラリから開く。
+// 未関連付けの main ウィンドウは PR-A/B までの名残で、今は作らない)。
 // ブラウザ検証では常に null(保存は localStorage、.bwt はダウンロード)
 let projPath = null;
 // 最近使ったプロジェクト(.bwt のパス、新しい順・最大8件)。全ウィンドウで共有(Tauri: recent.json)。
@@ -3134,8 +3135,9 @@ function hasContent() {
 // 空のプロジェクト(今の設定を引き継ぐ)の JSON
 const emptyProjectJson = () => JSON.stringify({ version: 1, settings, cur: 0, boards: [{ id: 1, name: t('projNewBoard'), boxes: [], conns: [], view: { x: 60, y: 80, s: 1 } }] });
 
-// ⌘⇧N / ⚙「新規プロジェクト…」(Tauri): 保存先を選び、空の .bwt を書いて、それを開く新しいウィンドウを作る。
-// いまのウィンドウは触らない(作品ごとにウィンドウを並べて書ける)。ブラウザ検証は従来どおり今の画面を置き換える
+// ⌘⇧N / ⚙「新規プロジェクト…」(Tauri): ライブラリを前面に出し、新規カードの題名欄を開く(作品はライブラリのフォルダに
+// <題名>.bwt として作られ、そのウィンドウが開く。保存ダイアログは出ない)。いまのウィンドウは触らない。
+// ブラウザ検証は従来どおり今の画面を置き換える
 let newProjectBusy = false;
 async function newProject() {
   closeMenu();
@@ -3144,21 +3146,10 @@ async function newProject() {
   if (newProjectBusy) return; // ネイティブメニューと keydown の両方が発火する環境での二重起動を防ぐ
   newProjectBusy = true;
   try {
-    let path;
-    try { path = await chooseProjectPath(defaultProjName()); }
-    catch (e) {
-      console.error('new project dialog failed', e);
-      hint(t('saveErr') + '：' + String(e?.message ?? e).slice(0, 120), 6000);
-      return;
-    }
-    if (!path) return;
-    try { await TAURI.core.invoke('write_text_file', { path, content: emptyProjectJson() }); }
-    catch (e) {
-      console.error('new project write failed', e);
-      hint(t('saveErr') + '：' + String(e?.message ?? e).slice(0, 120), 6000);
-      return;
-    }
-    if (await openInWindow(path)) hint(t('projNewDone', baseName(path)), 3500);
+    await TAURI.core.invoke('show_library_window', { newProject: true });
+  } catch (e) {
+    console.error('show library failed', e);
+    hint(t('projOpenErr'), 4000);
   } finally {
     newProjectBusy = false;
   }

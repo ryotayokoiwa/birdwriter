@@ -134,6 +134,10 @@ const STR = {
     projOpenBtn: '置き換えて開く',
     projOpened: n => `開きました: ${n}`,
     projOpenErr: 'ファイルを読み込めませんでした（形式が違うか破損しています）',
+    docRenameT: '作品の名前を変更（クリックで入力）',
+    nameInvalid: '名前に / \\ : * ? " < > | は使えません',
+    nameExists: '同じ名前の作品がすでにあります',
+    renameErr: '名前を変更できませんでした',
     guardErr: '中止しました — 現在のデータの保存またはバックアップに失敗したため',
     loadErr: '保存データを読み込めませんでした — 元の内容を退避し、新規で開始します',
     loadErrKeep: '保存データを読み込めませんでした — 退避にも失敗したため、編集するまで上書きしません',
@@ -287,6 +291,10 @@ const STR = {
     projOpenBtn: 'Replace & open',
     projOpened: n => `Opened: ${n}`,
     projOpenErr: 'Could not read the file (wrong format or corrupted)',
+    docRenameT: 'Rename the project (click to edit)',
+    nameInvalid: 'A name cannot contain / \\ : * ? " < > |',
+    nameExists: 'A work with that name already exists',
+    renameErr: 'Could not rename the project',
     guardErr: 'Cancelled — could not save or back up the current data first',
     loadErr: 'Could not read saved data — the original was set aside; starting fresh',
     loadErrKeep: 'Could not read saved data — preserving it also failed; nothing will be overwritten until you edit',
@@ -3059,6 +3067,7 @@ let lastTitle = null;
 // タイトル = 関連付いたファイル名(未関連付けは「Bird Writer」)
 function updateTitle() {
   const name = projPath ? baseName(projPath).replace(/\.bwt$/i, '') : null;
+  renderDocName(name);
   const title = name ? `${name} — Bird Writer` : 'Bird Writer';
   if (title === lastTitle) return; // setTitle の IPC を変化時だけに抑える
   lastTitle = title;
@@ -3069,6 +3078,80 @@ function updateTitle() {
     document.title = title;
   }
 }
+
+// ================= 作品名(上のバー) =================
+// 関連付いた .bwt の名前(拡張子なし)を B アイコンの隣に薄く出す。クリックでその場で入力 → Enter で Rust の rename_document
+// (同じフォルダ内で rename し、関連付け / session / 最近使った項目 / bookmark / タイトルを付け替える)。Esc で取消。
+// 未関連付け(ブラウザ版・体験版)では出さない。ライブラリ側から名前を変えたときは renamed イベントで追従する
+const docNameEl = $('docName');
+let renameBusy = false;
+// 名前が変わった: 関連付けのパスを差し替え、最近使った項目は古いパスを除いてから新しいパスを先頭に
+// (Rust 側も recent.json を書き換えるが、こちらの noteRecent が先に走ると古いパスを書き戻してしまう)
+function adoptRenamedPath(to) {
+  const from = projPath;
+  projPath = to;
+  recentProjects = recentProjects.filter(x => x !== from && x !== to);
+  updateTitle();
+  noteRecent(to);
+}
+function renderDocName(name) {
+  const show = !!(TAURI && projPath && name);
+  docNameEl.hidden = !show;
+  if (!show) { docNameEl.replaceChildren(); return; }
+  const btn = document.createElement('button');
+  btn.id = 'docNameBtn';
+  btn.type = 'button';
+  btn.textContent = name;
+  btn.title = t('docRenameT');
+  docNameEl.replaceChildren(btn);
+}
+function startDocRename() {
+  if (!TAURI || !projPath || renameBusy || docNameEl.hidden || docNameEl.querySelector('input')) return;
+  const cur = baseName(projPath).replace(/\.bwt$/i, '');
+  const inp = document.createElement('input');
+  inp.id = 'docNameInput';
+  inp.type = 'text';
+  inp.value = cur;
+  inp.autocomplete = 'off';
+  inp.spellcheck = false;
+  docNameEl.replaceChildren(inp);
+  inp.focus();
+  inp.select();
+  let done = false;
+  const finish = async (commit) => {
+    if (done) return;
+    const name = inp.value.trim();
+    if (commit && name && name !== cur) {
+      inp.disabled = true;
+      renameBusy = true;
+      try {
+        const to = await TAURI.core.invoke('rename_document', { name });
+        if (typeof to === 'string' && to) adoptRenamedPath(to);
+      } catch (e) {
+        const code = String(e?.message ?? e ?? '');
+        if (code === 'invalid-name') hint(t('nameInvalid'), 4000);
+        else if (code === 'exists') hint(t('nameExists'), 4000);
+        else { console.error('rename failed', e); hint(t('renameErr') + '：' + code.slice(0, 120), 6000); }
+        renameBusy = false;
+        inp.disabled = false;
+        inp.focus();
+        return;
+      }
+      renameBusy = false;
+    }
+    done = true;
+    updateTitle(); // 名前の表示とウィンドウのタイトルを揃える(取消ならそのまま)
+    renderDocName(projPath ? baseName(projPath).replace(/\.bwt$/i, '') : null);
+  };
+  inp.addEventListener('keydown', (e) => {
+    e.stopPropagation(); // アプリのショートカットに渡さない
+    if (e.isComposing) return; // IME 変換中の Enter / Esc は IME に任せる
+    if (e.key === 'Enter') { e.preventDefault(); finish(true); }
+    else if (e.key === 'Escape') { e.preventDefault(); finish(false); }
+  });
+  inp.addEventListener('blur', () => { if (!inp.disabled) finish(false); });
+}
+docNameEl.addEventListener('click', (e) => { if (e.target.closest('#docNameBtn')) startDocRename(); });
 
 // .bwt の既定ファイル名(日付入り)
 const defaultProjName = () => t('projDefaultName', new Date().toISOString().slice(0, 10)) + '.bwt';
@@ -4021,6 +4104,12 @@ if (TAURI) {
   });
   TAURI.event.listen('recent-changed', (e) => {
     try { recentProjects = normalizeRecent(JSON.parse(e.payload)); } catch (err) { /* ignore */ }
+  });
+  // この作品の名前が変わった(ライブラリの「名前を変更…」/ 上のバー): 関連付けのパスとタイトルを追従
+  listenHere('renamed', (e) => {
+    const to = e.payload;
+    if (typeof to !== 'string' || !to || to === projPath) return;
+    adoptRenamedPath(to);
   });
   // 関連付いた .bwt がこのウィンドウの外で変更されたら(AI アシスタントや別のアプリ)、読み直すか尋ねる。
   // 確認はウィンドウが前面に戻ったときと 15 秒おき。比較は Rust 側(mtime が最後に読み書きしたときと違えば変更あり)

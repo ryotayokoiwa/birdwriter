@@ -121,6 +121,11 @@ const STR = {
     projNewDone: n => `新しいプロジェクトを作成しました: ${n}`,
     projNewBoard: '無題',
     projOpenElsewhere: 'そのファイルは別のウィンドウで開いています',
+    bindingLost: '前回のファイルにアクセスできません（移動・削除されたか、権限が切れています）。⚙ →「プロジェクトを開く…」で選び直してください',
+    extChangedTitle: 'ファイルが外部で変更されました',
+    extChangedBody: n => `「${n}」がこのウィンドウの外で変更されています（AI アシスタントや別のアプリ）。再読み込みすると、このウィンドウで直前に書いてまだ保存されていない分は失われます。再読み込みしない場合は、次の保存で外部の変更が上書きされます。`,
+    extReloadBtn: '再読み込み',
+    extReloaded: 'ファイルを読み直しました',
     recentLabel: '最近使ったプロジェクト',
     projDefaultName: n => `プロジェクト ${n}`,
     projSaved: n => `保存しました: ${n}`,
@@ -269,6 +274,11 @@ const STR = {
     projNewDone: n => `Created a new project: ${n}`,
     projNewBoard: 'Untitled',
     projOpenElsewhere: 'That file is open in another window',
+    bindingLost: 'The previous file is no longer accessible (moved, deleted, or permission lost). Choose it again with ⚙ → Open project…',
+    extChangedTitle: 'File changed outside Bird Writer',
+    extChangedBody: n => `“${n}” was modified outside this window (an AI assistant or another app). Reloading discards what you typed here that is not saved yet; if you don't reload, the next save will overwrite the external changes.`,
+    extReloadBtn: 'Reload',
+    extReloaded: 'Reloaded from file',
     recentLabel: 'Recent Projects',
     projDefaultName: n => `Project ${n}`,
     projSaved: n => `Saved: ${n}`,
@@ -3242,6 +3252,36 @@ async function openRecent(p) {
   }
 }
 
+// 外部で変更された .bwt をこのウィンドウに読み直す(Tauri、関連付いたウィンドウ)。履歴・選択はリセット、設定は共有ストアのまま。
+// 読み直した内容の上から古い内容を書き戻さないよう、予約中の自動保存は捨てる
+async function reloadFromFile() {
+  closeFocus({ resume: false });
+  closeSearch();
+  endConnect();
+  endLinkPick(true);
+  if (editing != null) { document.activeElement?.blur(); editing = null; }
+  while (saveInFlight) await saveInFlight.catch(() => {});
+  clearTimeout(saveTimer);
+  dirty = false; dirtySince = 0;
+  let raw = null;
+  try { raw = await persist.load(); } catch (e) { console.error('reload failed', e); }
+  if (!raw) { hint(t('projOpenErr'), 4000); return; }
+  const keepSettings = { ...settings };
+  try { hydrate(raw); } catch (e) { console.error('reload parse failed', e); hint(t('projOpenErr'), 4000); return; }
+  settings = keepSettings;
+  lang = settings.lang;
+  undoStack.length = 0;
+  redoStack.length = 0;
+  navStack.length = 0;
+  updateBackBtn();
+  selected = null;
+  multiSel.clear();
+  applyTheme(); applyGrid(); applyLang(); applyFontSize(); applyLabelStyle();
+  renderTabs();
+  renderBoard();
+  hint(t('extReloaded'), 3000);
+}
+
 // ブラウザ検証用: 選んだ .bwt で今の画面を置き換える(Tauri では新しいウィンドウで開くので使わない)
 async function importProject(json, displayName) {
   // 置き換え前に形式を検証
@@ -3984,6 +4024,26 @@ if (TAURI) {
   TAURI.event.listen('recent-changed', (e) => {
     try { recentProjects = normalizeRecent(JSON.parse(e.payload)); } catch (err) { /* ignore */ }
   });
+  // 関連付いた .bwt がこのウィンドウの外で変更されたら(AI アシスタントや別のアプリ)、読み直すか尋ねる。
+  // 確認はウィンドウが前面に戻ったときと 15 秒おき。比較は Rust 側(mtime が最後に読み書きしたときと違えば変更あり)
+  let extCheckBusy = false;
+  async function checkExternalChange() {
+    if (extCheckBusy || projPath == null || !overlayEl.hidden) return;
+    extCheckBusy = true;
+    try {
+      if (!(await TAURI.core.invoke('check_external_change'))) return;
+      const go = await showConfirm(t('extChangedTitle'), t('extChangedBody', baseName(projPath)), t('extReloadBtn'));
+      if (go) await reloadFromFile();
+      else await TAURI.core.invoke('ack_external_change').catch(() => {});
+    } catch (e) {
+      console.error('external change check failed', e);
+    } finally {
+      extCheckBusy = false;
+    }
+  }
+  addEventListener('focus', () => { checkExternalChange(); });
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') checkExternalChange(); });
+  setInterval(checkExternalChange, 15000);
   // ネイティブメニュー(ファイル)からの操作(Rust がフォーカス中のウィンドウへ送る)
   listenHere('menu', (e) => {
     const id = e.payload;
@@ -3999,10 +4059,14 @@ if (TAURI) {
 
 // ================= 起動 =================
 async function boot() {
-  let loaded = false, damaged = false, raw = null, sharedSettings = null;
+  let loaded = false, damaged = false, raw = null, sharedSettings = null, bindingLost = false;
   if (TAURI) {
     // このウィンドウの関連付け(.bwt)と、全ウィンドウ共有の設定 / 最近使った項目
-    try { projPath = (await TAURI.core.invoke('window_binding')) || null; } catch (e) { console.error('window_binding failed', e); }
+    try {
+      const b = await TAURI.core.invoke('window_binding');
+      projPath = b?.path || null;
+      bindingLost = !!b?.lost; // 前回の関連付け(bookmark)を復元できなかった: 描画後に案内する
+    } catch (e) { console.error('window_binding failed', e); }
     try { const sj = await TAURI.core.invoke('load_settings'); if (sj) sharedSettings = normalizeSettings(JSON.parse(sj)); } catch (e) { console.error('settings load failed', e); }
     try { const rj = await TAURI.core.invoke('load_recent'); if (rj) recentProjects = normalizeRecent(JSON.parse(rj)); } catch (e) { console.error('recent load failed', e); }
   }
@@ -4046,6 +4110,7 @@ async function boot() {
     markDirty();
     if (!loaded) hint(t('welcome'), 5000);
   }
+  if (bindingLost) hint(t('bindingLost'), 9000);
 }
 
 // 体験版のロック画面から書き出しを呼べるように、フラグがあるときだけ公開する

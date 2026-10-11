@@ -456,6 +456,9 @@ function hydrate(json) {
 
 // ================= 自動保存 (P0-1) =================
 let dirty = false, saveTimer = null, dirtySince = 0, saveFailed = false, saveInFlight = null, saveRetryTimer = null;
+// 最後に読み込んだ / 書いた状態(serialize の結果)。同じなら書かない: 開いただけで .bwt の mtime と inode が変わらない
+// (外部変更の誤検知や同期ソフトの無駄な反応を避け、security-scoped bookmark も作り直さずに済む)
+let lastSaved = null;
 function markDirty() {
   dirty = true;
   const now = Date.now();
@@ -476,9 +479,12 @@ async function flushSave() {
   clearTimeout(saveTimer);
   clearTimeout(saveRetryTimer);
   dirty = false; dirtySince = 0;
-  saveInFlight = persist.save(serialize());
+  const data = serialize();
+  if (data === lastSaved) return true; // 変更が無ければ書かない
+  saveInFlight = persist.save(data);
   try {
     await saveInFlight;
+    lastSaved = data;
     if (saveFailed) { saveFailed = false; updateSaveWarn(); }
   } catch (e) {
     dirty = true;
@@ -3261,6 +3267,7 @@ async function reloadFromFile() {
   try { hydrate(raw); } catch (e) { console.error('reload parse failed', e); hint(t('projOpenErr'), 4000); return; }
   settings = keepSettings;
   lang = settings.lang;
+  lastSaved = serialize(); // 読み直した内容が保存済み(次の編集まで書かない)
   undoStack.length = 0;
   redoStack.length = 0;
   navStack.length = 0;
@@ -4074,6 +4081,7 @@ async function boot() {
     cur = 0;
   }
   if (sharedSettings) settings = sharedSettings; // 共有ストアが正(.bwt / data.json に埋め込まれた設定より優先)
+  if (loaded) lastSaved = serialize(); // 読み込んだままなら保存しない(マイグレーションの結果は次の編集で書かれる)
   applyTheme();
   applyGrid();
   applyLabelStyle();
@@ -4096,8 +4104,7 @@ async function boot() {
     hint(t(preserved ? 'loadErr' : 'loadErrKeep'), 8000);
     if (preserved) markDirty();
   } else {
-    // 起動直後に現在の状態を保存し直す: 初回起動でファイルを作り、
-    // 旧形式データ(色名など)のマイグレーション結果も永続化する
+    // 初回起動(読めるデータが無い)はファイルを作る。読み込めたときは変更が無い限り書かない(lastSaved と同じなら flushSave が省く)
     markDirty();
     if (!loaded) hint(t('welcome'), 5000);
   }

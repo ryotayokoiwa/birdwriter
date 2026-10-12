@@ -2226,18 +2226,30 @@ addEventListener('paste', (e) => {
   insertImageFiles(files, toWorld(viewport.clientWidth / 2, viewport.clientHeight / 2 + TOP));
 });
 
-// ドラッグ&ドロップ(落とした位置に挿入)
+// ドラッグ&ドロップ(落とした位置に挿入)。
+// ドロップ先の点線(.dropping)は、箱の上を通ってウィンドウの外へ抜けると dragleave の target が箱になって消えず残っていた(2026-10-12)。
+// → dragenter / dragleave の出入りを数えて 0 で消す。ドラッグ中は mousemove が来ないので、通常のマウス移動が来たら保険で消す
+let dropDepth = 0;
+const endDropping = () => { dropDepth = 0; viewport.classList.remove('dropping'); };
+viewport.addEventListener('dragenter', (e) => {
+  if (!e.dataTransfer?.types?.includes('Files')) return;
+  dropDepth++;
+  viewport.classList.add('dropping');
+});
 viewport.addEventListener('dragover', (e) => {
   if (!e.dataTransfer?.types?.includes('Files')) return;
   e.preventDefault();
   e.dataTransfer.dropEffect = 'copy';
   viewport.classList.add('dropping');
 });
-viewport.addEventListener('dragleave', (e) => {
-  if (e.target === viewport) viewport.classList.remove('dropping');
+viewport.addEventListener('dragleave', () => {
+  if (!viewport.classList.contains('dropping')) return;
+  dropDepth = Math.max(0, dropDepth - 1);
+  if (dropDepth === 0) viewport.classList.remove('dropping');
 });
+viewport.addEventListener('mousemove', () => { if (viewport.classList.contains('dropping')) endDropping(); });
 viewport.addEventListener('drop', (e) => {
-  viewport.classList.remove('dropping');
+  endDropping();
   const files = [...(e.dataTransfer?.files ?? [])].filter(f => f.type.startsWith('image/'));
   if (!files.length) return;
   e.preventDefault();

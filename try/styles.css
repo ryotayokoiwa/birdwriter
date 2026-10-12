@@ -307,31 +307,35 @@ button { font-family: inherit; }
 /* 俯瞰（30%未満）: 模様モードでは色の wash を使わない（箱は紙色のまま。識別は帯が担う） */
 :root[data-labels="pattern"] #viewport.overview .box[data-color] { background: var(--card-bg); }
 
-/* ボックスタイトル: 構造レイヤーの見出し。--inv(1/zoom)で逆スケールし、
-   ズームアウトしても画面上でほぼ一定の大きさに読める(本文=内容レイヤーとの分離)。
-   箱の上辺の「外側」に浮かせるので、どのズームでも自分の本文とは重ならない(Figmaのフレーム名方式) */
-.box .btitle {
+/* 先頭: 縮小したとき本文の冒頭(1 行目 / 20 字)を読める大きさで出す(「題」の後継。docs/design/head-mock.html)。
+   大きさは --inv(1/ズーム)で補正、表示は --lod(45% 以上 0 / 35% 以下 1 / 間はフェード。world に設定)。
+   箱の左上に本文へ重ねて出す(ラベルの帯がある箱では帯の右から)。縦書きは右上に縦のまま。クリックは箱に通す */
+.box .head {
   position: absolute;
-  bottom: calc(100% + 5px);
-  left: 0;
-  max-width: calc(100% - 8px);
+  left: 10px; top: 6px;
+  max-width: calc(100% - 16px);
   font-family: var(--font-ui);
+  font-weight: 500;
   font-size: min(calc(12px * var(--inv, 1)), 96px);
-  line-height: 1.3;
-  font-weight: 600;
+  line-height: 1.25;
   color: var(--ink-soft);
-  padding: 1px 8px 2px;
-  border-radius: 6px;
-  background: var(--canvas-bg); /* 低ズームで上の箱と重なっても、下地でラベルとして読める */
+  background: inherit;
+  padding: 0 .2em;
+  border-radius: .2em;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  opacity: var(--lod, 0);
+  transition: opacity .25s;
+  pointer-events: none;
+  z-index: 1;
 }
-.box .btitle[contenteditable="true"] {
-  cursor: text;
-  outline: 1.5px solid var(--selection);
-  outline-offset: 2px;
-  min-width: 3em;
-  user-select: text; -webkit-user-select: text;
+.box.labeled .head { left: calc(min(8px * var(--inv, 1), 48px) + 8px); max-width: calc(100% - 16px - min(8px * var(--inv, 1), 48px)); }
+.box.vertical .head {
+  left: auto; right: 6px; top: 10px;
+  max-width: none; max-height: calc(100% - 20px);
+  writing-mode: vertical-rl;
 }
+.box.vertical.labeled .head { right: 6px; }
+.box.editing .head, #viewport.focusing .box .head, #viewport.noheads .box .head { display: none; }
 
 /* 下の余白は字数カウンター(.count)の居場所。自動サイズだと高さが内容ぴったりに
    なるため、ここを削ると本文とカウンターが重なる */

@@ -44,7 +44,6 @@ const STR = {
     zoomInT: '拡大', zoomOutT: '縮小',
     total: n => `このボード <b>${n}</b> 字`, chars: ' 字',
     vert: '縦', vtT: '縦書き / 横書き',
-    btitle: '題', btitleT: 'タイトルを付ける / 編集（俯瞰でも読める見出し）',
     connect: '接続', connectT: '別のボックスと接続',
     link: 'リンク', linkT: '他のボードへリンク',
     focus: '集中', focusT: '全画面で集中執筆',
@@ -74,6 +73,7 @@ const STR = {
     imgErr: '画像を読み込めませんでした',
     imgAdded: n => `画像を${n}枚追加しました`,
     gridShow: '格子を表示',
+    headShow: '縮小しても先頭を表示',
     themeLabel: 'テーマ', themeLight: 'ライト', themeDark: 'ダーク', themeSystem: 'システム連動',
     labelStyleLabel: 'ラベルの表示', labelPattern: '模様（縞・べた・水玉・斜線）', labelColor: '色',
     langLabel: '言語 / Language',
@@ -201,7 +201,6 @@ const STR = {
     zoomInT: 'Zoom in', zoomOutT: 'Zoom out',
     total: n => `This board: <b>${n}</b> words`, chars: ' words',
     vert: '縦', vtT: 'Vertical / horizontal writing',
-    btitle: 'Title', btitleT: 'Add or edit a title (stays readable when zoomed out)',
     connect: 'Connect', connectT: 'Connect to another box',
     link: 'Link', linkT: 'Link to another board',
     focus: 'Focus', focusT: 'Focus mode (fullscreen)',
@@ -231,6 +230,7 @@ const STR = {
     imgErr: 'Could not read the image',
     imgAdded: n => `Added ${n} images`,
     gridShow: 'Show grid',
+    headShow: 'Show first line when zoomed out',
     themeLabel: 'Theme', themeLight: 'Light', themeDark: 'Dark', themeSystem: 'System',
     labelStyleLabel: 'Label style', labelPattern: 'Patterns (stripes, solid, dots, hatch)', labelColor: 'Colors',
     langLabel: '言語 / Language',
@@ -368,7 +368,7 @@ const newBoard = (name) => ({ id: bid++, name, boxes: [], conns: [], view: { x: 
 let boards = [];
 let cur = 0;
 const FONT_SIZES = [13, 15, 17, 19]; // 小 / 標準 / 大 / 特大
-let settings = { lang: 'ja', theme: 'system', grid: true, fontSize: 15, labelStyle: 'pattern' };
+let settings = { lang: 'ja', theme: 'system', grid: true, fontSize: 15, labelStyle: 'pattern', headOnZoomOut: true };
 // このウィンドウが関連付いている .bwt のパス(Tauri: 起動時に window_binding で受け取る)。
 // 関連付いたウィンドウの自動保存はその .bwt 自体に書く。Tauri では常に関連付いている(作品はライブラリから開く。
 // 未関連付けの main ウィンドウは PR-A/B までの名残で、今は作らない)。
@@ -417,12 +417,26 @@ const normalizeSettings = (s) => {
     grid: s.grid !== false,
     fontSize: FONT_SIZES.includes(+s.fontSize) ? +s.fontSize : 15,
     labelStyle: s.labelStyle === 'color' ? 'color' : 'pattern', // ラベルの描き方（既定=模様。データの色名はそのまま）
+    headOnZoomOut: s.headOnZoomOut !== false, // 縮小したとき本文の先頭を読める大きさで出す（既定=オン）
   };
 };
+
+// 「題」(title) は廃止(1.2)。旧ファイルの題は本文の 1 行目に差し込んで引き継ぐ(1 行目がすでに同じなら差し込まない)。
+// 以後 title は空文字で保存する(キーは互換のため残す)。戻り値 = 差し込んだか(あれば開いた直後に一度だけ保存する)
+let migratedTitles = false;
+function foldTitle(b) {
+  const title = String(b.title ?? '').replace(/\s+/g, ' ').trim();
+  const text = String(b.text ?? '');
+  if (!title) return text;
+  migratedTitles = true;
+  const first = text.split('\n')[0].trim();
+  return first === title ? text : (text ? title + '\n' + text : title);
+}
 
 function hydrate(json) {
   const d = JSON.parse(json);
   if (!d || !Array.isArray(d.boards) || !d.boards.length) throw new Error('empty state');
+  migratedTitles = false;
   boards = d.boards.map(bd => ({
     id: bd.id,
     name: String(bd.name ?? ''),
@@ -431,8 +445,8 @@ function hydrate(json) {
       type: b.type === 'image' ? 'image' : 'text',
       x: +b.x || 0, y: +b.y || 0,
       w: Math.max(80, +b.w || 260), h: Math.max(60, +b.h || 180),
-      text: String(b.text ?? ''),
-      title: String(b.title ?? ''),
+      text: foldTitle(b), // 画像ボックスに題が付いていた場合もデータは失わない(表示はしない)
+      title: '',
       src: typeof b.src === 'string' ? b.src : undefined,
       vert: !!b.vert,
       color: COLOR_MIGRATE[b.color] || (COLORS.includes(b.color) ? b.color : 'none'),
@@ -625,13 +639,12 @@ function applyOp(op, dir) { // dir: 1 = 順方向(redo), -1 = 逆方向(undo)
       const b = boxById(bd, it.id);
       if (b) b.vert = dir > 0 ? it.to : it.from;
     });
-  } else if (T === 'color' || T === 'vert' || T === 'link' || T === 'title') {
+  } else if (T === 'color' || T === 'vert' || T === 'link') {
     const b = boxById(bd, op.id);
     if (b) {
       const v = dir > 0 ? op.to : op.from;
       if (T === 'color') b.color = v;
       else if (T === 'vert') b.vert = v;
-      else if (T === 'title') b.title = v;
       else b.link = v;
     }
   } else if (T === 'add') {
@@ -754,6 +767,8 @@ const applyView = () => {
   world.style.transform = `translate(${v.x}px, ${v.y}px) scale(${v.s})`;
   // タイトルは「構造レイヤー」: ズームに関係なく画面上でほぼ一定の大きさを保つ(逆スケール)
   world.style.setProperty('--inv', String(Math.min(8, 1 / v.s)));
+  // 本文が読めなくなる 45% から先頭を出す(35〜45% でフェード)。先頭の大きさは --inv で補正
+  world.style.setProperty('--lod', headOpacity(v.s).toFixed(2));
   zoomLabel.textContent = Math.round(v.s * 100) + '%';
   viewport.classList.toggle('overview', v.s < 0.30); // 俯瞰ワッシュ閾値
   positionToolbar();
@@ -1112,27 +1127,15 @@ function createBoxEl(b) {
 
   el.innerHTML = `
     <div class="stripe"></div>
-    <div class="btitle" hidden></div>
     ${isImg
       ? `<img class="imgc" draggable="false" alt="">`
-      : `<div class="content" contenteditable="false" spellcheck="false"></div><span class="count"></span>`}
+      : `<div class="head" hidden></div><div class="content" contenteditable="false" spellcheck="false"></div><span class="count"></span>`}
     <div class="grip"></div>
     <button class="badge" hidden></button>`;
   if (isImg) el.querySelector('.imgc').src = b.src;
   else el.querySelector('.content').innerText = b.text;
   updateBadge(el, b);
-  updateTitleBar(el, b);
-
-  // --- タイトル(ダブルクリックで編集。編集中以外はドラッグの取っ手として機能) ---
-  const btl = el.querySelector('.btitle');
-  btl.addEventListener('mousedown', (e) => { if (btl.contentEditable === 'true') e.stopPropagation(); });
-  btl.addEventListener('dblclick', (e) => { e.stopPropagation(); startTitleEdit(b, el); });
-  btl.addEventListener('paste', plainPaste);
-  btl.addEventListener('keydown', (ev) => {
-    if (btl.contentEditable !== 'true' || ev.isComposing) return;
-    if (ev.key === 'Enter') { ev.preventDefault(); btl.blur(); }
-    else if (ev.key === 'Escape') { ev.stopPropagation(); btl.textContent = b.title || ''; btl.blur(); }
-  });
+  updateHead(el, b);
 
   // --- 選択 / リンク先選択 / 接続確定 / ドラッグ移動 ---
   el.addEventListener('mousedown', (e) => {
@@ -1267,12 +1270,15 @@ function createBoxEl(b) {
       content.contentEditable = 'false';
       b.text = content.innerText;
       if (editing === b.id) editing = null;
+      el.classList.remove('editing');
+      updateHead(el, b);
       updateToolbar();
       markDirty();
     });
     content.addEventListener('input', () => {
       b.text = content.innerText;
       scheduleCounts();
+      scheduleHead(el, b);
       refitAfterEdit(b, el); // 書きながら箱が育つ(重なった隣は書字方向へ押し出し)
       markDirty();
     });
@@ -1302,44 +1308,38 @@ function createBoxEl(b) {
   return el;
 }
 
-function updateTitleBar(el, b) {
-  const tl = el.querySelector('.btitle');
-  if (!tl) return;
-  tl.textContent = b.title || '';
-  const has = !!(b.title && b.title.trim());
-  tl.hidden = !has;
-  el.classList.toggle('titled', has);
+// ================= 先頭(縮小したとき本文の冒頭を読める大きさで出す) =================
+// 「題」の後継。本文の先頭行(最初の改行まで)を 20 字で切り、切れたら「…」。先頭の空白は除く。本文から都度作るので保存形式は変えない。
+// 大きさは --inv(1/ズーム)で補正、表示は --lod(45% 以上 0 / 35% 以下 1 / 間は線形)。編集中・集中モード・設定オフでは出さない(CSS)
+const HEAD_MAX = 20;
+function headText(text) {
+  const line = String(text ?? '').replace(/^\s+/u, '').split('\n')[0].replace(/\s+$/u, '');
+  if (!line) return '';
+  const cps = [...line];
+  return cps.length > HEAD_MAX ? cps.slice(0, HEAD_MAX).join('') + '…' : line;
 }
-
-// タイトルの編集を開始(未設定なら空の見出し行を出して入力させる)。
-// 確定=Enter/フォーカス外し、取り消し=Esc、空にすれば見出しごと消える
-function startTitleEdit(b, el) {
-  const tl = el.querySelector('.btitle');
-  if (!tl) return;
-  tl.hidden = false;
-  el.classList.add('titled');
-  tl.contentEditable = 'true';
-  tl.textContent = b.title || '';
-  tl.focus();
-  const r = document.createRange(); r.selectNodeContents(tl);
-  const s = getSelection(); s.removeAllRanges(); s.addRange(r);
-  tl.addEventListener('blur', () => {
-    tl.contentEditable = 'false';
-    const nv = tl.textContent.replace(/\s+/g, ' ').trim();
-    if (nv !== (b.title || '')) {
-      pushOp({ t: 'title', board: board().id, id: b.id, from: b.title || '', to: nv });
-      b.title = nv;
-      markDirty();
-    }
-    updateTitleBar(el, b);
-    refitAfterEdit(b, el); // titled の切替で本文の上余白が変わるため
-  }, { once: true });
+const headOpacity = s => (s >= 0.45 ? 0 : s <= 0.35 ? 1 : (0.45 - s) / 0.10);
+function updateHead(el, b) {
+  const h = el.querySelector('.head');
+  if (!h) return;
+  const s = b.type === 'image' ? '' : headText(b.text);
+  if (h.textContent !== s) h.textContent = s;
+  h.hidden = !s;
+}
+// 入力のたびに作り直すのは無駄なので少し待つ(blur で確定時にも更新する)
+function scheduleHead(el, b) {
+  clearTimeout(el._headTimer);
+  el._headTimer = setTimeout(() => updateHead(el, b), 150);
+}
+function applyHead() {
+  viewport.classList.toggle('noheads', !settings.headOnZoomOut);
 }
 
 function startEdit(b, el, { atStart = false, caret = null } = {}) {
   const content = el.querySelector('.content');
   if (!content) return;
   editing = b.id;
+  el.classList.add('editing');
   content.contentEditable = 'true';
   content.focus();
   if (caret != null) {
@@ -2048,11 +2048,6 @@ $('tbLink').addEventListener('click', (e) => {
   showMenu(r.left, r.bottom + 8, items);
 });
 
-$('tbTitle').addEventListener('click', () => {
-  const b = boxById(board(), selected); if (!b) return;
-  startTitleEdit(b, $('box' + b.id));
-});
-
 $('tbFocus').addEventListener('click', () => {
   const b = boxById(board(), selected); if (!b || b.type === 'image') return;
   openFocus(b, $('box' + b.id));
@@ -2450,6 +2445,7 @@ function openFocus(b, boxEl, { caret = null, resume = false } = {}) {
   focusTarget = { b, boxEl, resume };
   focusContent.innerText = b.text;
   focusEl.classList.add('open');
+  viewport.classList.add('focusing');
   focusRefresh();
   updateToolbar();
   focusContent.focus();
@@ -2464,7 +2460,9 @@ function closeFocus({ resume = true } = {}) {
   b.text = focusContent.innerText;
   const content = boxEl.querySelector('.content');
   if (content) content.innerText = b.text;
+  updateHead(boxEl, b);
   focusEl.classList.remove('open');
+  viewport.classList.remove('focusing');
   focusTarget = null;
   refitAfterEdit(b, boxEl); // 集中モードで増減した分を反映
   updateCounts();
@@ -2529,7 +2527,6 @@ function applyLang() {
   $('zoomIn').title = t('zoomInT');
   $('zoomOut').title = t('zoomOutT');
   tbVert.textContent = t('vert'); tbVert.title = t('vtT');
-  $('tbTitle').textContent = t('btitle'); $('tbTitle').title = t('btitleT');
   $('tbConn').textContent = t('connect'); $('tbConn').title = t('connectT');
   $('tbLink').textContent = t('link'); $('tbLink').title = t('linkT');
   $('tbFocus').textContent = t('focus'); $('tbFocus').title = t('focusT');
@@ -2571,6 +2568,7 @@ $('setBtn').addEventListener('click', (e) => {
     { label: t('boardVert'), action: () => setBoardVert(true) },
     { label: t('boardHorz'), action: () => setBoardVert(false) },
     { label: t('gridShow'), check: settings.grid, action: () => { settings.grid = !settings.grid; applyGrid(); saveSettings(); } },
+    { label: t('headShow'), check: settings.headOnZoomOut, action: () => { settings.headOnZoomOut = !settings.headOnZoomOut; applyHead(); saveSettings(); } },
     { header: t('labelStyleLabel') },
     { label: t('labelPattern'), check: check(settings.labelStyle === 'pattern'), action: () => setLabelStyle('pattern') },
     { label: t('labelColor'), check: check(settings.labelStyle === 'color'), action: () => setLabelStyle('color') },
@@ -2978,8 +2976,7 @@ function renderDialog() {
       item.className = 'dlgItem';
       const sn = document.createElement('span');
       sn.className = 'snip';
-      // タイトルがあればそれを見出しとして使う(無ければ本文の冒頭)
-      sn.textContent = (i + 1) + '. ' + snippet(b.title && b.title.trim() ? b.title : b.text, 22);
+      sn.textContent = (i + 1) + '. ' + snippet(b.text, 22);
       const up = document.createElement('button');
       up.textContent = '↑'; up.title = t('moveUp');
       up.addEventListener('click', () => moveDlgItem(i, -1));
@@ -3276,7 +3273,7 @@ async function newProjectInPlace() {
   projPath = null;
   markDirty();
   updateTitle();
-  applyTheme(); applyGrid(); applyLang(); applyFontSize(); applyLabelStyle();
+  applyTheme(); applyGrid(); applyHead(); applyLang(); applyFontSize(); applyLabelStyle();
   renderTabs();
   renderBoard();
   hint(t('projNewDone', name), 3500);
@@ -3357,7 +3354,7 @@ async function reloadFromFile() {
   updateBackBtn();
   selected = null;
   multiSel.clear();
-  applyTheme(); applyGrid(); applyLang(); applyFontSize(); applyLabelStyle();
+  applyTheme(); applyGrid(); applyHead(); applyLang(); applyFontSize(); applyLabelStyle();
   renderTabs();
   renderBoard();
   hint(t('extReloaded'), 3000);
@@ -3405,7 +3402,7 @@ async function importProject(json, displayName) {
   selected = null;
   projPath = null; // ブラウザ検証ではファイルの関連付けは付かない
   updateTitle();
-  applyTheme(); applyGrid(); applyLang(); applyFontSize(); applyLabelStyle();
+  applyTheme(); applyGrid(); applyHead(); applyLang(); applyFontSize(); applyLabelStyle();
   renderTabs();
   renderBoard();
   markDirty();
@@ -3523,7 +3520,7 @@ async function runRestore(name) {
   multiSel.clear();
   selected = null;
   updateTitle();
-  applyTheme(); applyGrid(); applyLang(); applyFontSize(); applyLabelStyle();
+  applyTheme(); applyGrid(); applyHead(); applyLang(); applyFontSize(); applyLabelStyle();
   renderTabs();
   renderBoard();
   markDirty();
@@ -4098,7 +4095,7 @@ if (TAURI) {
     if (JSON.stringify(next) === JSON.stringify(settings)) return;
     settings = next;
     lang = settings.lang;
-    applyTheme(); applyGrid(); applyLabelStyle(); applyLang(); applyFontSize();
+    applyTheme(); applyGrid(); applyHead(); applyLabelStyle(); applyLang(); applyFontSize();
     fitAllBoxes();
     markDirty(); // 状態に埋め込んだ設定も揃える
   });
@@ -4170,9 +4167,10 @@ async function boot() {
     cur = 0;
   }
   if (sharedSettings) settings = sharedSettings; // 共有ストアが正(.bwt / data.json に埋め込まれた設定より優先)
-  if (loaded) lastSaved = serialize(); // 読み込んだままなら保存しない(マイグレーションの結果は次の編集で書かれる)
+  if (loaded && !migratedTitles) lastSaved = serialize(); // 読み込んだままなら保存しない(旧「題」を差し込んだときだけ一度書く)
   applyTheme();
   applyGrid();
+  applyHead();
   applyLabelStyle();
   applyLang();
   applyFontSize();

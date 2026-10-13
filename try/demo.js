@@ -9,7 +9,9 @@
   window.BW_DEMO = { noOpen: true };
 
   const V = window.BW_DEMO_VERSION || '';
-  const lang = /^ja/i.test(navigator.language || '') ? 'ja' : 'en';
+  // 言語: ?lang=ja|en があればそれ、無ければブラウザの言語（案内のダイアログに切替リンクあり）
+  const qs = new URLSearchParams(location.search);
+  const lang = /^(ja|en)$/.test(qs.get('lang') || '') ? qs.get('lang') : (/^ja/i.test(navigator.language || '') ? 'ja' : 'en');
   const STORE_MAC = lang === 'ja' ? 'https://apps.apple.com/jp/app/id6791197348' : 'https://apps.apple.com/us/app/id6791197348';
   const SITE = '../';
   const TRIAL_DAYS = 7;
@@ -19,10 +21,10 @@
       days: n => `残り ${n} 日`,
       title: 'Bird Writer をブラウザで試す',
       p1: 'これは <b>7日間</b> の体験版です。書いたものは<b>このブラウザの中にだけ</b>保存され、ファイルには残りません。',
-      p2: 'サンプル原稿「海辺の章」を入れてあります。<b>縮小して全体を眺め、拡大して書く</b>——それが Bird Writer の使い方です。⌘＋スクロール（ピンチ）でズーム、ドラッグで移動、ダブルクリックで新しいボックス。',
+      p2: '最初のボード「はじめに」に、使い方を 6 つの箱にまとめてあります。<b>縮小して全体を眺め、拡大して書く</b>——それが Bird Writer の使い方です。⌘＋スクロール（ピンチ）でズーム、ドラッグで移動、ダブルクリックで新しい箱。',
       p3: '気に入ったらアプリ版へ。書いたものは ⚙ →「別名で保存…」で .bwt に書き出し、アプリで開けます（この体験版では .bwt を開くことはできません）。',
       p4: 'ブラウザの都合で ⌘N と ⌘⇧S は効きません（アプリ版では使えます）。',
-      start: 'はじめる', mac: 'Mac App Store で入手', win: 'Windows 版は近日公開', reset: '体験データを消して最初から', resetConfirm: 'このブラウザに保存した体験データをすべて消して、サンプル原稿に戻します。よろしいですか？',
+      start: 'はじめる', mac: 'Mac App Store で入手', win: 'Windows 版は近日公開', switchLang: 'English', reset: '体験データを消して最初から', resetConfirm: 'このブラウザに保存した体験データをすべて消して、「はじめに」のボードに戻します。よろしいですか？',
       gateTitle: 'Bird Writer 体験版', gate: 'この体験版はパソコンのブラウザ向けです（キーボードとマウス／トラックパッドで操作します）。Mac か Windows のブラウザで開いてください。', gateLink: 'アプリについて',
       lockTitle: '体験期間（7日）が終わりました', lock: '続きはアプリ版で。書いたものは書き出せます。',
       exportBwt: '.bwt に書き出す', exportTxt: '.txt に書き出す',
@@ -32,10 +34,10 @@
       days: n => (n === 1 ? '1 day left' : `${n} days left`),
       title: 'Try Bird Writer in your browser',
       p1: 'This is a <b>7-day</b> trial. What you write is saved <b>only in this browser</b>, not to a file.',
-      p2: 'A sample manuscript, “Seaside”, is loaded. <b>Zoom out to see the whole, zoom in to write</b> — that is how Bird Writer works. ⌘/Ctrl + scroll (or pinch) to zoom, drag to pan, double-click for a new box.',
+      p2: 'The first board, “Getting Started”, explains the basics in six boxes. <b>Zoom out to see the whole, zoom in to write</b> — that is how Bird Writer works. ⌘/Ctrl + scroll (or pinch) to zoom, drag to pan, double-click for a new box.',
       p3: 'If you like it, get the app. Export your work with ⚙ → “Save As…” (.bwt) and open it in the app (the trial itself cannot open .bwt files).',
       p4: 'Because of the browser, ⌘N and ⌘⇧S are not available here (they work in the app).',
-      start: 'Start', mac: 'Get it on the Mac App Store', win: 'Windows version coming soon', reset: 'Clear trial data and start over', resetConfirm: 'This will erase all trial data saved in this browser and reload the sample. Continue?',
+      start: 'Start', mac: 'Get it on the Mac App Store', win: 'Windows version coming soon', switchLang: '日本語', reset: 'Clear trial data and start over', resetConfirm: 'This will erase all trial data saved in this browser and reload the guide. Continue?',
       gateTitle: 'Bird Writer trial', gate: 'This trial is made for desktop browsers (keyboard and mouse/trackpad). Please open it on a Mac or Windows computer.', gateLink: 'About the app',
       lockTitle: 'The 7-day trial has ended', lock: 'Continue in the app. You can still export what you wrote.',
       exportBwt: 'Export as .bwt', exportTxt: 'Export as .txt',
@@ -62,18 +64,30 @@
   const daysLeft = Math.max(0, Math.ceil((deadline - now) / DAY));
   const expired = daysLeft <= 0;
 
-  // ② 初回: サンプル原稿を仕込む(2回目以降はそのブラウザの続きから)
-  const KEY = 'birdwriter-data';
+  // ② 初回: 案内のボード「はじめに」(guide-<lang>.bwt)を仕込む(2回目以降はそのブラウザの続きから)。
+  //    言語を切り替えたとき(?lang=)は、案内に手を付けていなければその言語の案内を入れ直し、
+  //    書き換えてあれば内容はそのままで UI の言語だけ合わせる
+  const KEY = 'birdwriter-data', SEED_KEY = 'bw-demo-seed';
+  const texts = (d) => JSON.stringify((d.boards || []).map(b => (b.boxes || []).map(x => x.text)));
   let first = false;
   try {
-    if (!localStorage.getItem(KEY)) {
-      const r = await fetch(`sample-${lang}.bwt?v=${V}`, { cache: 'no-store' });
+    const stored = localStorage.getItem(KEY);
+    let seed = null; try { seed = JSON.parse(localStorage.getItem(SEED_KEY) || 'null'); } catch (e) {}
+    const untouched = !!(stored && seed && seed.texts === texts(JSON.parse(stored)));
+    if (!stored || (seed && seed.lang !== lang && untouched)) {
+      const r = await fetch(`guide-${lang}.bwt?v=${V}`, { cache: 'no-store' });
       const d = await r.json();
       d.settings = { ...(d.settings || {}), lang, theme: 'system' };
       localStorage.setItem(KEY, JSON.stringify(d));
+      localStorage.setItem(SEED_KEY, JSON.stringify({ lang, texts: texts(d) }));
       first = true;
+    } else if (seed && seed.lang !== lang) {
+      const d = JSON.parse(stored);
+      d.settings = { ...(d.settings || {}), lang };
+      localStorage.setItem(KEY, JSON.stringify(d));
+      localStorage.setItem(SEED_KEY, JSON.stringify({ ...seed, lang }));
     }
-  } catch (e) { console.warn('sample seed failed', e); }
+  } catch (e) { console.warn('guide seed failed', e); }
 
   // ③ 本体を読み込む(seed の後で)
   await new Promise((res, rej) => {
@@ -114,21 +128,22 @@
       <h2 id="bwDemoTitle">${S.title}</h2>
       <p>${S.p1}</p><p>${S.p2}</p><p>${S.p3}</p><p class="small">${S.p4}</p>
       <div class="btns"><a class="link" href="${STORE_MAC}" target="_blank" rel="noopener">${S.mac}</a><span class="muted">${S.win}</span><span class="grow"></span><button type="button" class="primary">${S.start}</button></div>
-      <p class="reset"><button type="button" class="linkbtn">${S.reset}</button></p>
+      <p class="reset"><button type="button" class="linkbtn" data-act="lang">${S.switchLang}</button> · <button type="button" class="linkbtn" data-act="reset">${S.reset}</button></p>
     </div>`;
     const close = () => o.remove();
     o.querySelector('.primary').addEventListener('click', close);
     o.addEventListener('mousedown', (e) => { if (e.target === o) close(); });
-    o.querySelector('.linkbtn').addEventListener('click', () => {
+    o.querySelector('[data-act="lang"]').addEventListener('click', () => { location.href = '?lang=' + (lang === 'ja' ? 'en' : 'ja'); });
+    o.querySelector('[data-act="reset"]').addEventListener('click', () => {
       if (!confirm(S.resetConfirm)) return;
-      try { for (const k of Object.keys(localStorage)) if (k.startsWith('birdwriter-')) localStorage.removeItem(k); } catch (e) {}
-      location.reload();
+      try { for (const k of Object.keys(localStorage)) if (k.startsWith('birdwriter-')) localStorage.removeItem(k); localStorage.removeItem(SEED_KEY); } catch (e) {}
+      location.href = location.pathname + (lang === 'ja' ? '?lang=ja' : '?lang=en');
     });
     document.body.appendChild(o);
     o.querySelector('.primary').focus();
   }
   if (first) {
-    // 初回はサンプル全体が見えるように「全体」を押してから案内を出す（本体の描画完了を待つ）
+    // 初回は案内のボード全体が見えるように「全体」を押してから案内を出す（本体の描画完了を待つ）
     const t0 = Date.now();
     while (!document.querySelector('.box') && Date.now() - t0 < 3000) await new Promise(r => setTimeout(r, 50));
     document.getElementById('fitBtn')?.click();

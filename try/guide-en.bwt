@@ -1,0 +1,113 @@
+{
+ "version": 1,
+ "settings": {
+  "lang": "en",
+  "theme": "system",
+  "grid": true,
+  "fontSize": 15,
+  "labelStyle": "pattern",
+  "headOnZoomOut": true
+ },
+ "cur": 0,
+ "boards": [
+  {
+   "id": 1,
+   "name": "Getting Started",
+   "boxes": [
+    {
+     "id": 1,
+     "type": "text",
+     "x": 60,
+     "y": 60,
+     "w": 340,
+     "h": 200,
+     "text": "Welcome\nA writing app where fragments, notes, and scenes live as boxes on an infinite canvas. Zoom out to see the shape of the whole story; zoom in to lose yourself in a single passage. Structure and text share one space.",
+     "title": "",
+     "vert": false,
+     "color": "none",
+     "link": null
+    },
+    {
+     "id": 2,
+     "type": "text",
+     "x": 460,
+     "y": 60,
+     "w": 340,
+     "h": 200,
+     "text": "Move around first\n⌘ (Ctrl on Windows) + scroll, or pinch, to zoom. Drag to pan. “Fit” at the top right shows the whole board. Grab a box to move it.",
+     "title": "",
+     "vert": false,
+     "color": "none",
+     "link": null
+    },
+    {
+     "id": 3,
+     "type": "text",
+     "x": 860,
+     "y": 60,
+     "w": 340,
+     "h": 200,
+     "text": "Write\nDouble-click an empty spot to make a new box. Double-click a box to edit it, click outside to finish. Select a box and press “Focus” to write full screen.",
+     "title": "",
+     "vert": false,
+     "color": "none",
+     "link": null
+    },
+    {
+     "id": 4,
+     "type": "text",
+     "x": 60,
+     "y": 360,
+     "w": 340,
+     "h": 200,
+     "text": "Vertical & marks\nSelect a box and a toolbar appears below it. “縦” switches between vertical and horizontal writing. Press one of the pattern dots to mark the box, like this one. Marks stand out when you zoom out.",
+     "title": "",
+     "vert": false,
+     "color": "sky",
+     "link": null
+    },
+    {
+     "id": 5,
+     "type": "text",
+     "x": 460,
+     "y": 360,
+     "w": 340,
+     "h": 200,
+     "text": "See the structure\nZoom out and the first line of every box stays readable, like a heading. “Connect” draws a line between boxes, and the tabs at the top add more boards. Lay out chapters, plot notes, and characters in space.",
+     "title": "",
+     "vert": false,
+     "color": "none",
+     "link": null
+    },
+    {
+     "id": 6,
+     "type": "text",
+     "x": 860,
+     "y": 360,
+     "w": 340,
+     "h": 200,
+     "text": "Start here\nDelete this box and put your own words in its place. New project: ⚙ → “New Project…”. Stuck? ⚙ → “Keyboard Shortcuts…”.",
+     "title": "",
+     "vert": false,
+     "color": "none",
+     "link": null
+    }
+   ],
+   "conns": [
+    {
+     "a": 1,
+     "b": 2
+    },
+    {
+     "a": 2,
+     "b": 3
+    }
+   ],
+   "view": {
+    "x": 60,
+    "y": 80,
+    "s": 1
+   }
+  }
+ ]
+}

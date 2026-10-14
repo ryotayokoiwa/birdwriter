@@ -56,9 +56,7 @@ const STR = {
     copied: n => `${n}個のボックスをコピーしました`,
     cutDone: n => `${n}個のボックスを切り取りました`,
     kbCopy: 'ボックスのコピー / 切り取り / 貼り付け（選択中）',
-    split: '分割', splitT: '空行の位置で複数のボックスに分割',
-    splitNone: '空行がないため分割できません（分割したい位置に空の行を入れてください）',
-    splitDone: n => `${n}個のボックスに分割しました`,
+    splitHere: 'ここで分割', menuCut: '切り取り', menuCopy: 'コピー',
     splitCaretNone: 'カーソル位置の前後にテキストがないため分割できません',
     kbSplitCaret: 'カーソル位置で分割（テキスト編集中）',
     toVert: '縦書きへ', toHorz: '横書きへ',
@@ -213,9 +211,7 @@ const STR = {
     copied: n => `Copied ${n} box(es)`,
     cutDone: n => `Cut ${n} box(es)`,
     kbCopy: 'Copy / cut / paste boxes (while selected)',
-    split: 'Split', splitT: 'Split into boxes at blank lines',
-    splitNone: 'No blank line to split at (add an empty line where you want to split)',
-    splitDone: n => `Split into ${n} boxes`,
+    splitHere: 'Split Here', menuCut: 'Cut', menuCopy: 'Copy',
     splitCaretNone: 'Nothing on one side of the cursor to split',
     kbSplitCaret: 'Split at cursor (while editing)',
     toVert: 'Vertical', toHorz: 'Horizontal',
@@ -932,7 +928,10 @@ function drawWires() {
 // ================= メニュー（汎用） =================
 const menuEl = $('menu');
 const closeMenu = () => { menuEl.style.display = 'none'; };
+let menuKeepFocus = false; // 編集中の右クリックメニュー: 項目を押しても contenteditable のフォーカスを奪わない
+menuEl.addEventListener('mousedown', (e) => { if (menuKeepFocus) e.preventDefault(); });
 function showMenu(x, y, items, opts = {}) {
+  menuKeepFocus = !!opts.keepFocus;
   menuEl.innerHTML = '';
   items.forEach(it => {
     const d = document.createElement('div');
@@ -1274,6 +1273,24 @@ function createBoxEl(b) {
       updateHead(el, b);
       updateToolbar();
       markDirty();
+    });
+    // 編集中の右クリック: 切り取り / コピー / 貼り付け + 「ここで分割」。編集中でなければ今までどおり
+    content.addEventListener('contextmenu', (e) => {
+      if (editing !== b.id || document.activeElement !== content) return;
+      e.preventDefault();
+      const sel = getSelection();
+      const hasRange = sel.rangeCount > 0 && !sel.getRangeAt(0).collapsed && content.contains(sel.getRangeAt(0).commonAncestorContainer);
+      if (!hasRange) caretFromPoint(content, e.clientX, e.clientY); // 選択があればその先頭、無ければクリックした点
+      pendingSplit = { id: b.id, idx: caretOffsetIn(content) };
+      if (TAURI) {
+        TAURI.core.invoke('popup_edit_menu', { x: e.clientX, y: e.clientY }).catch(err => console.error('popup failed', err));
+      } else {
+        showMenu(e.clientX, e.clientY, [
+          { label: t('menuCut'), action: () => document.execCommand('cut') },
+          { label: t('menuCopy'), action: () => document.execCommand('copy') },
+          { label: t('splitHere'), action: () => splitPending() },
+        ], { keepFocus: true });
+      }
     });
     content.addEventListener('input', () => {
       b.text = content.innerText;
@@ -1696,34 +1713,7 @@ function mergeSelection() {
   hint(t('merged', targets.length));
 }
 
-// テキストボックスを空行の位置で分割する(1アンドゥ単位)。
-// 先頭の断片は元のボックスに残し(id・接続・リンクを保持)、以降は下(縦書きは左)に同サイズで並べる
-function splitBox(b) {
-  if (!b || b.type !== 'text') return;
-  const chunks = b.text
-    .split(/\n[ \t　]*\n+/)
-    .map(s => s.replace(/^\s+|\s+$/gu, ''))
-    .filter(s => s);
-  if (chunks.length < 2) { hint(t('splitNone'), 3600); return; }
-  const bd = board();
-  const gap = 24;
-  const created = chunks.slice(1).map((txt, i) => ({
-    id: uid++, type: 'text',
-    x: b.vert ? b.x - (b.w + gap) * (i + 1) : b.x,
-    y: b.vert ? b.y : b.y + (b.h + gap) * (i + 1),
-    w: b.w, h: b.h,
-    text: txt, title: '', vert: b.vert, color: b.color, link: null,
-  }));
-  const op = {
-    t: 'split', board: bd.id, id: b.id,
-    fromText: b.text, firstText: chunks[0],
-    created,
-  };
-  pushOp(op);
-  applyOp(op, 1);
-  hint(t('splitDone', chunks.length));
-}
-
+// 分割は「カーソル位置で 2 つに」だけ(1.2 で空行ごとに分ける「分割」ボタンは廃止)。
 // ⌘K: 編集中のボックスをカーソル位置で2つに分割する(Scrivener の Split at Selection と同じ作法)。
 // カーソル前は元の箱に残し(タイトル・接続・リンク保持)、後ろは新しい箱へ。
 // 分割後はそのまま新しい箱の先頭で編集を続行する。1アンドゥ(既存の split op)で元に戻る
@@ -1772,14 +1762,46 @@ function splitBoxAtCaret() {
   const el = $('box' + editing);
   const content = el?.querySelector('.content');
   if (!b || !content || document.activeElement !== content) return;
-  const idx = caretOffsetIn(content); // カーソル位置(innerText 上のオフセット)
-  if (idx == null) return;
+  splitBoxAt(b, el, caretOffsetIn(content)); // カーソル位置(innerText 上のオフセット)。選択があればその先頭
+}
+
+// 右クリック「ここで分割」: 右クリックの時点の位置(innerText 上のオフセット)を取っておき、メニューの選択後にそこで分ける。
+// Tauri はネイティブのメニュー(Rust の popup_edit_menu → menu イベント "split-here")、ブラウザ版は自前のメニュー
+let pendingSplit = null; // { id, idx }
+function splitPending() {
+  const p = pendingSplit;
+  pendingSplit = null;
+  if (!p) return;
+  const b = boxById(board(), p.id);
+  const el = $('box' + p.id);
+  if (!b || !el) return;
+  splitBoxAt(b, el, p.idx);
+}
+// クリックした点にキャレットを置く(選択が無いとき。ブラウザによっては右クリックで動かないため)
+function caretFromPoint(content, x, y) {
+  let r = null;
+  if (document.caretRangeFromPoint) r = document.caretRangeFromPoint(x, y);
+  else if (document.caretPositionFromPoint) {
+    const cp = document.caretPositionFromPoint(x, y);
+    if (cp) { r = document.createRange(); r.setStart(cp.offsetNode, cp.offset); }
+  }
+  if (!r || !content.contains(r.startContainer)) return false;
+  r.collapse(true);
+  const sel = getSelection(); sel.removeAllRanges(); sel.addRange(r);
+  return true;
+}
+
+// 箱 b を innerText 上のオフセット idx で 2 つに分ける(⌘K と右クリック「ここで分割」の共通部分)。
+// カーソル前は元の箱に残し(接続・リンク保持)、後ろは新しい箱へ。分割後は新しい箱の先頭で編集を続行。1 アンドゥ(split op)で戻る
+function splitBoxAt(b, el, idx) {
+  const content = el?.querySelector('.content');
+  if (!b || b.type !== 'text' || !content || idx == null) return false;
   const full = content.innerText;
   const before = full.slice(0, idx).replace(/\s+$/u, '');
   const after = full.slice(idx).replace(/^\s+/u, '');
-  if (!before || !after) { hint(t('splitCaretNone'), 3200); return; }
+  if (!before || !after) { hint(t('splitCaretNone'), 3200); return false; }
   b.text = full; // 最新のDOM内容をデータへ確定してから割る
-  document.activeElement.blur();
+  if (document.activeElement === content) document.activeElement.blur();
   const gap = 24;
   const created = [{
     id: uid++, type: 'text',
@@ -1803,6 +1825,7 @@ function splitBoxAtCaret() {
     ensureVisible(nb);
     startEdit(nb, nel, { atStart: true });
   }
+  return true;
 }
 
 // ================= キーボード操作(移動・新規・集中) =================
@@ -1972,7 +1995,6 @@ function updateToolbar() {
     tbVert.hidden = isImg;
     $('sepVert').hidden = isImg;
     $('tbFocus').hidden = isImg;
-    $('tbSplit').hidden = isImg;
     tbVert.classList.toggle('active', !!b.vert);
     tb.querySelectorAll('.sw').forEach(s => s.classList.toggle('on', s.dataset.c === b.color));
   }
@@ -2060,11 +2082,6 @@ $('tbLink').addEventListener('click', (e) => {
 $('tbFocus').addEventListener('click', () => {
   const b = boxById(board(), selected); if (!b || b.type === 'image') return;
   openFocus(b, $('box' + b.id));
-});
-
-$('tbSplit').addEventListener('click', () => {
-  const b = boxById(board(), selected);
-  if (b) splitBox(b);
 });
 
 $('tbMerge').addEventListener('click', () => mergeSelection());
@@ -2551,7 +2568,6 @@ function applyLang() {
   $('tbConn').textContent = t('connect'); $('tbConn').title = t('connectT');
   $('tbLink').textContent = t('link'); $('tbLink').title = t('linkT');
   $('tbFocus').textContent = t('focus'); $('tbFocus').title = t('focusT');
-  $('tbSplit').textContent = t('split'); $('tbSplit').title = t('splitT');
   $('tbMerge').textContent = t('merge'); $('tbMerge').title = t('mergeT');
   $('tbArrange').textContent = t('arrange'); $('tbArrange').title = t('arrangeT');
   tbDel.textContent = t('del'); tbDel.title = t('delT');
@@ -4156,6 +4172,7 @@ if (TAURI) {
     if (id === 'proj-save') { saveProject(); return; }     // 上書き保存は集中モード中も有効(⌘S の筆癖に応える)
     if (id === 'proj-save-as') { saveProjectAs(); return; }
     if (id === 'proj-new') { newProject(); return; }     // 集中モード中でも可(自分で確定して閉じる)
+    if (id === 'split-here') { splitPending(); return; } // 編集中の右クリックメニュー(Rust の popup_edit_menu)
     if (focusTarget) return; // 開く/書き出しのダイアログは集中モード中は開かない
     if (id === 'proj-open') openProjectDialog();
     else if (id === 'export-text') openExportDialog();

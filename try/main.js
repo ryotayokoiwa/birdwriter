@@ -741,6 +741,28 @@ function applyOp(op, dir) { // dir: 1 = 順方向(redo), -1 = 逆方向(undo)
   markDirty();
 }
 
+// テキスト編集中の ⌘Z: 文字レベルで戻すものが残っていなければ(編集を始めてから本文が変わっていない)、
+// 編集を抜けて直前のキャンバス操作(分割・新規ボックスなど)を戻す。分割を戻したときは元の箱の分割位置で編集を続ける。
+// 文字を打ったあとは OS 標準の取り消しに任せ、打った分が戻りきったら次の ⌘Z でキャンバス操作が戻る
+function editUndoExhausted() {
+  if (focusTarget || editing == null) return false;
+  const content = $('box' + editing)?.querySelector('.content');
+  if (!content || document.activeElement !== content) return false;
+  return editStartText != null && content.innerText === editStartText;
+}
+function undoWhileEditing() {
+  const op = undoStack[undoStack.length - 1];
+  if (!op) { hint(t('nothingUndo'), 1400); return; } // 戻すものが無ければ編集はそのまま
+  const content = $('box' + editing)?.querySelector('.content');
+  content?.blur(); // blur で本文を確定し editing を外す
+  if (editing != null) return;
+  undo();
+  if (op && op.t === 'split' && op.board === board().id) {
+    const b = boxById(board(), op.id);
+    const bel = $('box' + op.id);
+    if (b && bel) startEdit(b, bel, { caret: Math.min(op.firstText.length, b.text.length) });
+  }
+}
 function undo() {
   if (dragging || editing != null) return;
   const op = undoStack.pop();
@@ -1361,10 +1383,12 @@ function applyHead() {
   viewport.classList.toggle('noheads', !settings.headOnZoomOut);
 }
 
+let editStartText = null; // 編集を始めたときの本文(⌘Z で「文字の取り消しが残っていない」判定に使う)
 function startEdit(b, el, { atStart = false, caret = null } = {}) {
   const content = el.querySelector('.content');
   if (!content) return;
   editing = b.id;
+  editStartText = content.innerText;
   el.classList.add('editing');
   content.contentEditable = 'true';
   content.focus();
@@ -3960,7 +3984,13 @@ addEventListener('keydown', (e) => {
     return;
   }
   if (mod && (e.key === 'z' || e.key === 'Z')) {
-    if (isEditingContext()) return; // テキスト編集中は OS 標準アンドゥ
+    if (isEditingContext()) {
+      // テキスト編集中は OS 標準アンドゥ。ただし文字レベルで戻すものが無ければキャンバス操作を戻す(分割直後の ⌘Z など)
+      if (e.isComposing || e.shiftKey || !editUndoExhausted()) return;
+      e.preventDefault();
+      undoWhileEditing();
+      return;
+    }
     e.preventDefault();
     if (e.shiftKey) redo(); else undo();
     return;

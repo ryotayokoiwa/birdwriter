@@ -4203,6 +4203,17 @@ if (TAURI) {
     if (id === 'proj-save-as') { saveProjectAs(); return; }
     if (id === 'proj-new') { newProject(); return; }     // 集中モード中でも可(自分で確定して閉じる)
     if (id === 'split-here') { splitPending(); return; } // 編集中の右クリックメニュー(Rust の popup_edit_menu)
+    // 編集メニューの 取り消す / やり直す(⌘Z / ⇧⌘Z はこの項目のアクセラレータとして届く)。
+    // テキスト編集中で文字レベルで戻すものが残っていれば OS 標準(execCommand)、無ければキャンバス操作(keydown の ⌘Z と同じ規則)
+    if (id === 'edit-undo') {
+      if (isEditingContext()) { if (editUndoExhausted()) undoWhileEditing(); else document.execCommand('undo'); }
+      else undo();
+      return;
+    }
+    if (id === 'edit-redo') {
+      if (isEditingContext()) document.execCommand('redo'); else redo();
+      return;
+    }
     if (focusTarget) return; // 開く/書き出しのダイアログは集中モード中は開かない
     if (id === 'proj-open') openProjectDialog();
     else if (id === 'export-text') openExportDialog();

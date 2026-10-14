@@ -24,7 +24,7 @@
       p2: '最初のボード「はじめに」に、使い方を 6 つの箱にまとめてあります。<b>縮小して全体を眺め、拡大して書く</b>——それが Bird Writer の使い方です。⌘＋スクロール（ピンチ）でズーム、ドラッグで移動、ダブルクリックで新しい箱。',
       p3: '気に入ったらアプリ版へ。書いたものは ⚙ →「別名で保存…」で .bwt に書き出し、アプリで開けます（この体験版では .bwt を開くことはできません）。',
       p4: 'ブラウザの都合で ⌘N と ⌘⇧S は効きません（アプリ版では使えます）。',
-      start: 'はじめる', mac: 'Mac App Store で入手', win: 'Windows 版は近日公開', switchLang: 'English', reset: '体験データを消して最初から', resetConfirm: 'このブラウザに保存した体験データをすべて消して、「はじめに」のボードに戻します。よろしいですか？',
+      start: 'はじめる', mac: 'Mac App Store で入手', win: 'Windows 版は近日公開', switchLang: 'English', switchReseed: '案内を English で読み直す', switchUiOnly: '表示だけ English に', reset: '体験データを消して最初から', resetConfirm: 'このブラウザに保存した体験データをすべて消して、「はじめに」のボードに戻します。よろしいですか？',
       gateTitle: 'Bird Writer 体験版', gate: 'この体験版はパソコンのブラウザ向けです（キーボードとマウス／トラックパッドで操作します）。Mac か Windows のブラウザで開いてください。', gateLink: 'アプリについて',
       lockTitle: '体験期間（7日）が終わりました', lock: '続きはアプリ版で。書いたものは書き出せます。',
       exportBwt: '.bwt に書き出す', exportTxt: '.txt に書き出す',
@@ -37,7 +37,7 @@
       p2: 'The first board, “Getting Started”, explains the basics in six boxes. <b>Zoom out to see the whole, zoom in to write</b> — that is how Bird Writer works. ⌘/Ctrl + scroll (or pinch) to zoom, drag to pan, double-click for a new box.',
       p3: 'If you like it, get the app. Export your work with ⚙ → “Save As…” (.bwt) and open it in the app (the trial itself cannot open .bwt files).',
       p4: 'Because of the browser, ⌘N and ⌘⇧S are not available here (they work in the app).',
-      start: 'Start', mac: 'Get it on the Mac App Store', win: 'Windows version coming soon', switchLang: '日本語', reset: 'Clear trial data and start over', resetConfirm: 'This will erase all trial data saved in this browser and reload the guide. Continue?',
+      start: 'Start', mac: 'Get it on the Mac App Store', win: 'Windows version coming soon', switchLang: '日本語', switchReseed: 'Read the guide in 日本語', switchUiOnly: 'Switch only the interface to 日本語', reset: 'Clear trial data and start over', resetConfirm: 'This will erase all trial data saved in this browser and reload the guide. Continue?',
       gateTitle: 'Bird Writer trial', gate: 'This trial is made for desktop browsers (keyboard and mouse/trackpad). Please open it on a Mac or Windows computer.', gateLink: 'About the app',
       lockTitle: 'The 7-day trial has ended', lock: 'Continue in the app. You can still export what you wrote.',
       exportBwt: 'Export as .bwt', exportTxt: 'Export as .txt',
@@ -120,6 +120,18 @@
   addEventListener('pageshow', recheck);
   setInterval(recheck, 60e3);
 
+  // 案内のボードに手を付けたか(仕込んだ本文と違う、または旧サンプルのまま)
+  function guideModified() {
+    try {
+      const stored = localStorage.getItem(KEY);
+      let seed = null; try { seed = JSON.parse(localStorage.getItem(SEED_KEY) || 'null'); } catch (e) {}
+      return !!(stored && (!seed || seed.texts !== texts(JSON.parse(stored))));
+    } catch (e) { return false; }
+  }
+  function langLinks() {
+    if (!guideModified()) return `<button type="button" class="linkbtn" data-act="lang">${S.switchLang}</button>`;
+    return `<button type="button" class="linkbtn" data-act="lang-reseed">${S.switchReseed}</button> · <button type="button" class="linkbtn" data-act="lang-ui">${S.switchUiOnly}</button>`;
+  }
   function showIntro() {
     if (document.getElementById('bwDemoIntro')) return;
     const o = document.createElement('div');
@@ -128,12 +140,20 @@
       <h2 id="bwDemoTitle">${S.title}</h2>
       <p>${S.p1}</p><p>${S.p2}</p><p>${S.p3}</p><p class="small">${S.p4}</p>
       <div class="btns"><a class="link" href="${STORE_MAC}" target="_blank" rel="noopener">${S.mac}</a><span class="muted">${S.win}</span><span class="grow"></span><button type="button" class="primary">${S.start}</button></div>
-      <p class="reset"><button type="button" class="linkbtn" data-act="lang">${S.switchLang}</button> · <button type="button" class="linkbtn" data-act="reset">${S.reset}</button></p>
+      <p class="reset">${langLinks()} · <button type="button" class="linkbtn" data-act="reset">${S.reset}</button></p>
     </div>`;
     const close = () => o.remove();
     o.querySelector('.primary').addEventListener('click', close);
     o.addEventListener('mousedown', (e) => { if (e.target === o) close(); });
-    o.querySelector('[data-act="lang"]').addEventListener('click', () => { location.href = '?lang=' + (lang === 'ja' ? 'en' : 'ja'); });
+    // 言語の切替: 案内に手を付けていなければ 1 つのリンク(読み込み時にその言語の案内へ入れ替わる)。
+    // 書き換えてあれば「案内を読み直す(内容を捨てる)」と「表示だけ」の 2 つに分ける(勝手に消さない・勝手に残さない)
+    const next = lang === 'ja' ? 'en' : 'ja';
+    o.querySelector('[data-act="lang"]')?.addEventListener('click', () => { location.href = '?lang=' + next; });
+    o.querySelector('[data-act="lang-reseed"]')?.addEventListener('click', () => {
+      try { for (const k of Object.keys(localStorage)) if (k.startsWith('birdwriter-')) localStorage.removeItem(k); localStorage.removeItem(SEED_KEY); } catch (e) {}
+      location.href = '?lang=' + next;
+    });
+    o.querySelector('[data-act="lang-ui"]')?.addEventListener('click', () => { location.href = '?lang=' + next; });
     o.querySelector('[data-act="reset"]').addEventListener('click', () => {
       if (!confirm(S.resetConfirm)) return;
       try { for (const k of Object.keys(localStorage)) if (k.startsWith('birdwriter-')) localStorage.removeItem(k); localStorage.removeItem(SEED_KEY); } catch (e) {}

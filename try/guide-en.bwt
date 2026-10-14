@@ -60,7 +60,7 @@
      "y": 360,
      "w": 340,
      "h": 200,
-     "text": "Vertical & marks\nSelect a box and a toolbar appears below it. “縦” switches between vertical and horizontal writing. Press one of the pattern dots to mark the box, like this one. Marks stand out when you zoom out.",
+     "text": "Marks\nSelect a box and a toolbar appears below it. Press one of the pattern dots to mark the box, like this one.\nMarks stand out when you zoom out. Vertical writing can be turned on in Settings.",
      "title": "",
      "vert": false,
      "color": "sky",

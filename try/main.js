@@ -219,6 +219,7 @@ const STR = {
     vtAllHorz: 'Horiz', vtAllHorzT: 'Make all selected text boxes horizontal',
     vtAllDone: (n, v) => `Made ${n} box(es) ${v ? 'vertical' : 'horizontal'} (use Tidy to fix overlaps)`,
     boardVert: 'Make this board all vertical', boardHorz: 'Make this board all horizontal',
+    showVertical: 'Show vertical writing',
     boardVtDone: (n, v) => `Made ${n} box(es) ${v ? 'vertical' : 'horizontal'}`,
     boardVtNone: v => `All boxes on this board are already ${v ? 'vertical' : 'horizontal'}`,
     close: '✕ Close', closeT: 'Back to canvas (Esc)',
@@ -364,7 +365,7 @@ const newBoard = (name) => ({ id: bid++, name, boxes: [], conns: [], view: { x: 
 let boards = [];
 let cur = 0;
 const FONT_SIZES = [13, 15, 17, 19]; // 小 / 標準 / 大 / 特大
-let settings = { lang: 'ja', theme: 'system', grid: true, fontSize: 15, labelStyle: 'pattern', headOnZoomOut: true };
+let settings = { lang: 'ja', theme: 'system', grid: true, fontSize: 15, labelStyle: 'pattern', headOnZoomOut: true, showVertical: false };
 // このウィンドウが関連付いている .bwt のパス(Tauri: 起動時に window_binding で受け取る)。
 // 関連付いたウィンドウの自動保存はその .bwt 自体に書く。Tauri では常に関連付いている(作品はライブラリから開く。
 // 未関連付けの main ウィンドウは PR-A/B までの名残で、今は作らない)。
@@ -414,6 +415,7 @@ const normalizeSettings = (s) => {
     fontSize: FONT_SIZES.includes(+s.fontSize) ? +s.fontSize : 15,
     labelStyle: s.labelStyle === 'color' ? 'color' : 'pattern', // ラベルの描き方（既定=模様。データの色名はそのまま）
     headOnZoomOut: s.headOnZoomOut !== false, // 縮小したとき本文の先頭を読める大きさで出す（既定=オン）
+    showVertical: s.showVertical === true, // 英語 UI でも縦書きの操作を出す（既定=オフ。日本語 UI では常に出るので無関係）
   };
 };
 
@@ -1994,6 +1996,15 @@ function disarmDelete() {
   tbDel.classList.remove('armed');
 }
 
+// 縦書きの操作(ツールバーの「縦」/ 複数選択の一括切替 / ⚙ のボード全体 / 集中モードの切替)を隠すか:
+// 英語で書く人には不要なので、英語 UI では settings.showVertical がオンのときだけ出す。日本語 UI では常に出す。
+// 表示そのものは変えない(縦書きの箱は英語 UI でも縦書きのまま。保存・読み込みも不変)
+const vertHidden = () => lang === 'en' && !settings.showVertical;
+function applyVertical() {
+  updateToolbar();
+  if (focusTarget) focusRefresh();
+}
+
 function updateToolbar() {
   const multi = multiSel.size > 1; // 複数選択時は「N個選択 + 削除」のみ表示 (#2)
   const b = !multi && selected != null ? boxById(board(), selected) : null;
@@ -2010,14 +2021,14 @@ function updateToolbar() {
     // 結合はテキストボックスが2つ以上選ばれているときだけ
     $('tbMerge').hidden = texts.length < 2;
     // 縦横の一括切替はテキストボックスがあるときだけ。ラベルは「これから適用する向き」(全部縦書きなら横へ、それ以外は縦へ)
-    tbVertAll.hidden = !texts.length;
+    tbVertAll.hidden = !texts.length || vertHidden();
     const toVert = !texts.every(b => b.vert);
     tbVertAll.textContent = t(toVert ? 'vtAllVert' : 'vtAllHorz');
     tbVertAll.title = t(toVert ? 'vtAllVertT' : 'vtAllHorzT');
   } else {
     const isImg = b.type === 'image';
-    tbVert.hidden = isImg;
-    $('sepVert').hidden = isImg;
+    tbVert.hidden = isImg || vertHidden();
+    $('sepVert').hidden = isImg || vertHidden();
     $('tbFocus').hidden = isImg;
     tbVert.classList.toggle('active', !!b.vert);
     tb.querySelectorAll('.sw').forEach(s => s.classList.toggle('on', s.dataset.c === b.color));
@@ -2499,6 +2510,7 @@ let focusTarget = null;
 function focusRefresh() {
   focusCountEl.textContent = countMetric(focusTarget.b.text) + t('chars');
   focusVt.textContent = focusTarget.b.vert ? t('toHorz') : t('toVert');
+  focusVt.hidden = vertHidden();
   focusEl.classList.toggle('vertical', focusTarget.b.vert);
 }
 // caret: 集中モード側で最初に置くキャレット位置(innerText オフセット。null なら末尾)
@@ -2598,6 +2610,7 @@ function applyLang() {
   $('focusClose').textContent = t('close'); $('focusClose').title = t('closeT');
   if (focusTarget) focusRefresh();
   else focusVt.textContent = t('toVert');
+  applyVertical(); // 言語で縦書きの操作の有無が変わる
   updateCounts();
   if (TAURI) TAURI.core.invoke('set_menu_language', { lang }).catch(console.error);
 }
@@ -2626,10 +2639,14 @@ $('setBtn').addEventListener('click', (e) => {
     { label: t('insertImage'), action: () => imgInput.click() },
     { label: t('aiGuideMenu'), action: () => copyAiGuide() },
     { label: t('kbMenu'), action: () => openShortcutsDialog() },
-    { label: t('boardVert'), action: () => setBoardVert(true) },
-    { label: t('boardHorz'), action: () => setBoardVert(false) },
+    ...(vertHidden() ? [] : [
+      { label: t('boardVert'), action: () => setBoardVert(true) },
+      { label: t('boardHorz'), action: () => setBoardVert(false) },
+    ]),
     { label: t('gridShow'), check: settings.grid, action: () => { settings.grid = !settings.grid; applyGrid(); saveSettings(); } },
     { label: t('headShow'), check: settings.headOnZoomOut, action: () => { settings.headOnZoomOut = !settings.headOnZoomOut; applyHead(); saveSettings(); } },
+    // 英語 UI だけ: 縦書きの操作を出す(日本語 UI では常に出るので項目も出さない)
+    ...(lang === 'en' ? [{ label: t('showVertical'), check: settings.showVertical, action: () => { settings.showVertical = !settings.showVertical; applyVertical(); saveSettings(); } }] : []),
     { header: t('labelStyleLabel') },
     { label: t('labelPattern'), check: check(settings.labelStyle === 'pattern'), action: () => setLabelStyle('pattern') },
     { label: t('labelColor'), check: check(settings.labelStyle === 'color'), action: () => setLabelStyle('color') },

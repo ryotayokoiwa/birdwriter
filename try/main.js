@@ -1311,12 +1311,21 @@ function createBoxEl(b) {
 // ================= 先頭(縮小したとき本文の冒頭を読める大きさで出す) =================
 // 「題」の後継。本文の先頭行(最初の改行まで)を 20 字で切り、切れたら「…」。先頭の空白は除く。本文から都度作るので保存形式は変えない。
 // 大きさは --inv(1/ズーム)で補正、表示は --lod(45% 以上 0 / 35% 以下 1 / 間は線形)。編集中・集中モード・設定オフでは出さない(CSS)
-const HEAD_MAX = 20;
+// 文字数ではなく幅で切る: 全角(CJK・全角記号・絵文字)= 1、それ以外(ラテン文字・数字・半角記号・空白)= 0.7。
+// 日本語は 20 字、英語の行は 28 字程度("Welcome to Bird Writer" は切れない)、混在は比例
+const HEAD_WIDTH = 20;
+const WIDE_RE = /[\u1100-\u115F\u2E80-\u303E\u3041-\u33FF\u3400-\u4DBF\u4E00-\u9FFF\uA000-\uA4CF\uAC00-\uD7A3\uF900-\uFAFF\uFE30-\uFE4F\uFF00-\uFF60\uFFE0-\uFFE6]|[\u{1F000}-\u{1FAFF}]|[\u{20000}-\u{3FFFD}]/u;
+const charWidth = c => (WIDE_RE.test(c) ? 1 : 0.7);
 function headText(text) {
   const line = String(text ?? '').replace(/^\s+/u, '').split('\n')[0].replace(/\s+$/u, '');
   if (!line) return '';
-  const cps = [...line];
-  return cps.length > HEAD_MAX ? cps.slice(0, HEAD_MAX).join('') + '…' : line;
+  let w = 0, out = '';
+  for (const c of line) {
+    w += charWidth(c);
+    if (w > HEAD_WIDTH + 1e-6) return out + '…';
+    out += c;
+  }
+  return line;
 }
 const headOpacity = s => (s >= 0.45 ? 0 : s <= 0.35 ? 1 : (0.45 - s) / 0.10);
 function updateHead(el, b) {

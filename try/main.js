@@ -101,7 +101,7 @@ const STR = {
     searchNone: '見つかりません', searchHits: n => `${n} 件`,
     exportMenu: '書き出し…', exportTitle: 'テキスト書き出し',
     scopeLabel: '対象', scopeBoard: 'このボード全体', scopeBox: '選択中のボックスのみ',
-    orderLabel: '結合順', orderH: '位置順（上から下）', orderV: '位置順（右から左・縦書き）',
+    orderLabel: '結合順', orderTB: '上から下', orderLR: '左から右', orderRL: '右から左',
     orderManual: '手動（下のリストで並べ替え）',
     sepBlank: 'ボックス間に空行を入れる',
     exportRun: '書き出す', cancel: 'キャンセル',
@@ -260,7 +260,7 @@ const STR = {
     searchNone: 'No results', searchHits: n => `${n} hit${n === 1 ? '' : 's'}`,
     exportMenu: 'Export…', exportTitle: 'Export text',
     scopeLabel: 'Scope', scopeBoard: 'Whole board', scopeBox: 'Selected box only',
-    orderLabel: 'Merge order', orderH: 'By position (top to bottom)', orderV: 'By position (right to left, vertical)',
+    orderLabel: 'Merge order', orderTB: 'Top to bottom', orderLR: 'Left to right', orderRL: 'Right to left',
     orderManual: 'Manual (reorder below)',
     sepBlank: 'Blank line between boxes',
     exportRun: 'Export', cancel: 'Cancel',
@@ -3100,12 +3100,14 @@ function openExportDialog() {
   closeMenu();
   closeSearch();
   const selBox = selected != null ? boxById(board(), selected) : null;
+  const list = board().boxes.filter(b => b.type === 'text' && b.text.trim());
   dlg = {
     scope: 'board',
-    order: 'h',
+    // 既定: 横書きは「左から右」、全部縦書きなら「右から左」(Tab の読み順と同じ判定)
+    order: list.length && list.every(b => b.vert) ? 'rl' : 'lr',
     sep: true,
     selBox: (selBox && selBox.type === 'text') ? selBox : null,
-    list: board().boxes.filter(b => b.type === 'text' && b.text.trim()),
+    list,
   };
   sortDlgList();
   renderDialog();
@@ -3149,9 +3151,27 @@ function showConfirm(title, body, okLabel) {
     overlayEl.hidden = false;
   });
 }
+// 位置順。上下(または左右)に重なりのある箱は同じ行(列)と見なす: 数ピクセルのずれで順が入れ替わらないように
+// 'tb' = 行ごとに上から、行の中は左から / 'lr' = 列ごとに左から、列の中は上から / 'rl' = 列ごとに右から、列の中は上から
+function bandsOf(list, axis) {
+  const lo = b => axis === 'y' ? b.y : b.x, hi = b => axis === 'y' ? b.y + b.h : b.x + b.w;
+  const bands = [];
+  [...list].sort((a, b) => lo(a) - lo(b)).forEach(b => {
+    const band = bands[bands.length - 1];
+    if (band && lo(b) < band.hi) { band.items.push(b); band.hi = Math.max(band.hi, hi(b)); }
+    else bands.push({ lo: lo(b), hi: hi(b), items: [b] });
+  });
+  return bands;
+}
+function positionOrder(list, mode) {
+  if (mode === 'tb') return bandsOf(list, 'y').flatMap(r => r.items.sort((a, b) => (a.x - b.x) || (a.y - b.y)));
+  const cols = bandsOf(list, 'x');
+  cols.forEach(c => c.items.sort((a, b) => (a.y - b.y) || (a.x - b.x)));
+  if (mode === 'rl') cols.reverse(); // 帯は左右に重ならないので、逆順 = 右の列から
+  return cols.flatMap(c => c.items);
+}
 function sortDlgList() {
-  if (dlg.order === 'h') dlg.list.sort((a, b) => (a.y - b.y) || (a.x - b.x));
-  else if (dlg.order === 'v') dlg.list.sort((a, b) => ((b.x + b.w) - (a.x + a.w)) || (a.y - b.y));
+  if (dlg.order !== 'm') dlg.list = positionOrder(dlg.list, dlg.order);
 }
 function moveDlgItem(i, d) {
   const j = i + d;
@@ -3193,10 +3213,8 @@ function renderDialog() {
 
   if (dlg.scope === 'board') {
     addLabel(t('orderLabel'));
-    addRadio('order', 'h', t('orderH'), dlg.order === 'h', false,
-      v => { dlg.order = v; sortDlgList(); renderDialog(); });
-    addRadio('order', 'v', t('orderV'), dlg.order === 'v', false,
-      v => { dlg.order = v; sortDlgList(); renderDialog(); });
+    ['tb', 'lr', 'rl'].forEach(k => addRadio('order', k, t('order' + k.toUpperCase()), dlg.order === k, false,
+      v => { dlg.order = v; sortDlgList(); renderDialog(); }));
     addRadio('order', 'm', t('orderManual'), dlg.order === 'm', false,
       v => { dlg.order = v; renderDialog(); });
 

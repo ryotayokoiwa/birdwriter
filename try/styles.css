@@ -154,6 +154,10 @@ button { font-family: inherit; }
   cursor: text; min-width: 3em; color: var(--ink);
   user-select: text; -webkit-user-select: text;
 }
+/* タブのドラッグ並べ替え */
+.tab.dragging { opacity: .45; }
+body.tab-dragging { cursor: grabbing; user-select: none; -webkit-user-select: none; }
+#tabDrop { position: fixed; display: none; width: 2px; border-radius: 1px; background: var(--selection); z-index: 101; pointer-events: none; }
 #addBoard {
   width: 24px; height: 24px; border-radius: 8px; border: none; flex: none;
   background: none; display: grid; place-items: center;
@@ -385,6 +389,14 @@ button { font-family: inherit; }
   border-bottom: 2px solid var(--hairline);
   border-radius: 0 0 3px 0;
 }
+/* 箱の端でも大きさを変えられる: 右端の縦帯 = 幅(横書き・画像)、下端の横帯 = 高さ(縦書き・画像)。
+   本文の padding の外側(幅 8px)だけに置き、角のつまみ(18px)は除く。見た目は無し */
+.box .edge { position: absolute; display: none; }
+.box .edge-r { top: 10px; right: 0; bottom: 18px; width: 8px; cursor: ew-resize; }
+.box .edge-b { left: 10px; right: 18px; bottom: 0; height: 8px; cursor: ns-resize; }
+.box:not(.vertical) .edge-r, .box.image .edge-r { display: block; }
+.box.vertical .edge-b, .box.image .edge-b { display: block; }
+.box.editing .edge { display: none; }
 .box .badge {
   position: absolute; top: -11px; right: 14px;
   display: flex; align-items: center; gap: 5px;

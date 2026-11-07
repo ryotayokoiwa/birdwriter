@@ -1148,6 +1148,53 @@ function updateBadge(el, b) {
 // 「集中モードで開く」ボタンの印(斜めに広がる矢印)。フォントに頼らず SVG で描く
 const FOCUS_ICON = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9.5 2.5h4v4M13.5 2.5 9 7M6.5 13.5h-4v-4M2.5 13.5 7 9"/></svg>';
 
+// 大きさの変更(角のつまみ / 箱の端から共通)。mode = 'both'(角) | 'w'(右端) | 'h'(下端)。
+// テキストは手動軸だけ(横書き=幅 / 縦書き=高さ)でもう一方は内容に追従、画像は mode の軸。select → ドラッグ → fitBox → undo の resize op → markDirty
+function startResize(b, el, e, mode) {
+  if (e.button !== 0) return;
+  e.preventDefault(); e.stopPropagation();
+  endActiveGesture(); // (#6)
+  select(b.id);
+  const v = board().view;
+  const ow = b.w, oh = b.h, ox = b.x, oy = b.y, sx = e.clientX, sy = e.clientY;
+  const doW = mode !== 'h', doH = mode !== 'w';
+  const move = (ev) => {
+    const dx = (ev.clientX - sx) / v.s, dy = (ev.clientY - sy) / v.s;
+    if (b.type === 'image') {
+      if (doW) { b.w = Math.max(80, ow + dx); el.style.width = b.w + 'px'; }
+      if (doH) { b.h = Math.max(60, oh + dy); el.style.height = b.h + 'px'; }
+    } else if (b.vert) {
+      b.h = Math.max(60, oh + dy);
+      el.style.height = b.h + 'px';
+      fitBox(b, el); // 幅は自動追従(右端固定)
+    } else {
+      b.w = Math.max(80, ow + dx);
+      el.style.width = b.w + 'px';
+      fitBox(b, el); // 高さは自動追従
+    }
+    drawWires();
+    positionToolbar();
+  };
+  const up = () => {
+    dragging = false;
+    removeEventListener('mousemove', move); removeEventListener('mouseup', up);
+    if (b.w !== ow || b.h !== oh || b.x !== ox || b.y !== oy) {
+      pushNeighbors(board(), b);
+      drawWires();
+      pushOp({
+        t: 'resize', board: board().id, id: b.id,
+        from: { x: ox, y: oy, w: ow, h: oh },
+        to: { x: b.x, y: b.y, w: b.w, h: b.h },
+      });
+      markDirty();
+    }
+    clearGesture();
+  };
+  startGesture(up);
+  dragging = true;
+  addEventListener('mousemove', move); addEventListener('mouseup', up);
+}
+
 function createBoxEl(b) {
   const isImg = b.type === 'image';
   const el = document.createElement('div');
@@ -1162,6 +1209,8 @@ function createBoxEl(b) {
     ${isImg
       ? `<img class="imgc" draggable="false" alt="">`
       : `<div class="head" hidden></div><div class="content" contenteditable="false" spellcheck="false"></div><span class="count"></span><button class="focusbtn" type="button" tabindex="-1"></button>`}
+    <div class="edge edge-r"></div>
+    <div class="edge edge-b"></div>
     <div class="grip"></div>
     <button class="badge" hidden></button>`;
   if (isImg) el.querySelector('.imgc').src = b.src;
@@ -1234,7 +1283,7 @@ function createBoxEl(b) {
     if (e.button !== 0) { e.preventDefault(); return; }
 
     if (e.target.closest('button')) return; // badge など
-    if (e.target.classList.contains('grip')) return;
+    if (e.target.classList.contains('grip') || e.target.classList.contains('edge')) return;
     const content = el.querySelector('.content');
     if (content && content.contentEditable === 'true') return; // 編集中はテキスト操作を優先
     e.preventDefault();
@@ -1278,50 +1327,10 @@ function createBoxEl(b) {
 
   // --- リサイズ ---
   // 自動サイズ導入後: テキストは手動軸のみ(横書き=幅 / 縦書き=高さ)、もう一方は内容に追従。
-  // 画像は従来どおり両軸
-  el.querySelector('.grip').addEventListener('mousedown', (e) => {
-    e.preventDefault(); e.stopPropagation();
-    endActiveGesture(); // (#6)
-    select(b.id);
-    const v = board().view;
-    const ow = b.w, oh = b.h, ox = b.x, oy = b.y, sx = e.clientX, sy = e.clientY;
-    const move = (ev) => {
-      const dx = (ev.clientX - sx) / v.s, dy = (ev.clientY - sy) / v.s;
-      if (b.type === 'image') {
-        b.w = Math.max(80, ow + dx);
-        b.h = Math.max(60, oh + dy);
-        el.style.width = b.w + 'px'; el.style.height = b.h + 'px';
-      } else if (b.vert) {
-        b.h = Math.max(60, oh + dy);
-        el.style.height = b.h + 'px';
-        fitBox(b, el); // 幅は自動追従(右端固定)
-      } else {
-        b.w = Math.max(80, ow + dx);
-        el.style.width = b.w + 'px';
-        fitBox(b, el); // 高さは自動追従
-      }
-      drawWires();
-      positionToolbar();
-    };
-    const up = () => {
-      dragging = false;
-      removeEventListener('mousemove', move); removeEventListener('mouseup', up);
-      if (b.w !== ow || b.h !== oh || b.x !== ox || b.y !== oy) {
-        pushNeighbors(board(), b);
-        drawWires();
-        pushOp({
-          t: 'resize', board: board().id, id: b.id,
-          from: { x: ox, y: oy, w: ow, h: oh },
-          to: { x: b.x, y: b.y, w: b.w, h: b.h },
-        });
-        markDirty();
-      }
-      clearGesture();
-    };
-    startGesture(up);
-    dragging = true;
-    addEventListener('mousemove', move); addEventListener('mouseup', up);
-  });
+  // 画像は従来どおり両軸。角のつまみ(grip)に加えて、箱の端(右端 = 幅 / 下端 = 高さ。本文の padding の外側)でも同じ処理
+  el.querySelector('.grip').addEventListener('mousedown', (e) => startResize(b, el, e, 'both'));
+  el.querySelector('.edge-r').addEventListener('mousedown', (e) => startResize(b, el, e, 'w'));
+  el.querySelector('.edge-b').addEventListener('mousedown', (e) => startResize(b, el, e, 'h'));
 
   // --- 編集（テキストのみ） ---
   if (!isImg) {
@@ -2389,6 +2398,66 @@ viewport.addEventListener('drop', (e) => {
 });
 
 // ================= ボード =================
+// タブのドラッグ並べ替え: つかんで横に動かすと差し込み位置の縦線が出て、離すと並べ替わる(moveBoard と同じく順序を保存)。
+// クリック(切替)・ダブルクリック(名前変更)・右クリックは従来どおり。4px 動くまではドラッグにしない
+let tabDrop = null; // 差し込み位置の縦線
+let tabDragJustEnded = false; // ドラッグ直後の click で切り替えないため
+function tabDropLine() {
+  if (!tabDrop) {
+    tabDrop = document.createElement('div');
+    tabDrop.id = 'tabDrop';
+    document.body.appendChild(tabDrop);
+  }
+  return tabDrop;
+}
+function startTabDrag(tab, i, e) {
+  if (e.button !== 0 || tab.contentEditable === 'true') return;
+  const sx = e.clientX, sy = e.clientY;
+  let active = false, target = i; // target = 並べ替え後の位置
+  const tabs = () => [...tabsEl.querySelectorAll('.tab')];
+  const move = (ev) => {
+    if (!active) {
+      if (Math.abs(ev.clientX - sx) < 4 && Math.abs(ev.clientY - sy) < 4) return;
+      active = true;
+      tab.classList.add('dragging');
+      document.body.classList.add('tab-dragging');
+    }
+    // 差し込み位置: ポインタより中心が右にある最初のタブの前(無ければ末尾)。自分を除いた並びで数える
+    const others = tabs().filter(t => t !== tab);
+    let k = others.length;
+    for (let n = 0; n < others.length; n++) {
+      const r = others[n].getBoundingClientRect();
+      if (ev.clientX < r.left + r.width / 2) { k = n; break; }
+    }
+    target = k;
+    const line = tabDropLine();
+    const ref = others[k] || others[others.length - 1];
+    const rr = ref ? ref.getBoundingClientRect() : tab.getBoundingClientRect();
+    const x = others[k] ? rr.left - 2 : rr.right + 1;
+    line.style.left = x + 'px';
+    line.style.top = rr.top + 'px';
+    line.style.height = rr.height + 'px';
+    line.style.display = 'block';
+  };
+  const up = () => {
+    removeEventListener('mousemove', move); removeEventListener('mouseup', up);
+    if (!active) return;
+    tab.classList.remove('dragging');
+    document.body.classList.remove('tab-dragging');
+    if (tabDrop) tabDrop.style.display = 'none';
+    tabDragJustEnded = true;
+    setTimeout(() => { tabDragJustEnded = false; }, 0);
+    if (target === i) return;
+    const curBoard = boards[cur];
+    const [bd] = boards.splice(i, 1);
+    boards.splice(target, 0, bd);
+    cur = boards.indexOf(curBoard);
+    renderTabs();
+    markDirty();
+  };
+  addEventListener('mousemove', move); addEventListener('mouseup', up);
+}
+
 function renderTabs() {
   tabsEl.innerHTML = '';
   boards.forEach((bd, i) => {
@@ -2396,7 +2465,8 @@ function renderTabs() {
     tab.className = 'tab' + (i === cur ? ' active' : '');
     tab.textContent = bd.name;
     tab.addEventListener('paste', plainPaste); // リネーム中の貼り付けもプレーンテキスト化
-    tab.addEventListener('click', () => { if (i !== cur && tab.contentEditable !== 'true') switchBoard(i); });
+    tab.addEventListener('click', () => { if (tabDragJustEnded) return; if (i !== cur && tab.contentEditable !== 'true') switchBoard(i); });
+    tab.addEventListener('mousedown', (e) => startTabDrag(tab, i, e));
     const rename = (e) => {
       e.preventDefault();
       if (tab.contentEditable === 'true') return;

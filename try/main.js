@@ -57,6 +57,7 @@ const STR = {
     cutDone: n => `${n}個のボックスを切り取りました`,
     kbCopy: 'ボックスのコピー / 切り取り / 貼り付け（選択中）',
     splitHere: 'ここで分割', menuCut: '切り取り', menuCopy: 'コピー',
+    focusHere: '集中モードで開く', openLibrary: 'ライブラリを開く', libraryT: 'ライブラリへ', kbLibrary: 'ライブラリ（ホーム）を開く',
     splitCaretNone: 'カーソル位置の前後にテキストがないため分割できません',
     kbSplitCaret: 'カーソル位置で分割（テキスト編集中）',
     toVert: '縦書きへ', toHorz: '横書きへ',
@@ -212,6 +213,7 @@ const STR = {
     cutDone: n => `Cut ${n} box(es)`,
     kbCopy: 'Copy / cut / paste boxes (while selected)',
     splitHere: 'Split Here', menuCut: 'Cut', menuCopy: 'Copy',
+    focusHere: 'Open in Focus Mode', openLibrary: 'Open Library', libraryT: 'Library', kbLibrary: 'Open the library (home)',
     splitCaretNone: 'Nothing on one side of the cursor to split',
     kbSplitCaret: 'Split at cursor (while editing)',
     toVert: 'Vertical', toHorz: 'Horizontal',
@@ -1139,6 +1141,9 @@ function updateBadge(el, b) {
   else badge.hidden = true;
 }
 
+// 「集中モードで開く」ボタンの印(斜めに広がる矢印)。フォントに頼らず SVG で描く
+const FOCUS_ICON = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9.5 2.5h4v4M13.5 2.5 9 7M6.5 13.5h-4v-4M2.5 13.5 7 9"/></svg>';
+
 function createBoxEl(b) {
   const isImg = b.type === 'image';
   const el = document.createElement('div');
@@ -1152,11 +1157,23 @@ function createBoxEl(b) {
     <div class="stripe"></div>
     ${isImg
       ? `<img class="imgc" draggable="false" alt="">`
-      : `<div class="head" hidden></div><div class="content" contenteditable="false" spellcheck="false"></div><span class="count"></span>`}
+      : `<div class="head" hidden></div><div class="content" contenteditable="false" spellcheck="false"></div><span class="count"></span><button class="focusbtn" type="button" tabindex="-1"></button>`}
     <div class="grip"></div>
     <button class="badge" hidden></button>`;
   if (isImg) el.querySelector('.imgc').src = b.src;
   else el.querySelector('.content').innerText = b.text;
+  // 編集中だけ見える「集中モードで開く」(⤢)。mousedown を止めて本文のフォーカスとカーソル位置を保ち、箱のドラッグも始めない
+  const fbtn = el.querySelector('.focusbtn');
+  if (fbtn) {
+    fbtn.innerHTML = FOCUS_ICON;
+    fbtn.title = t('focusHere');
+    fbtn.addEventListener('mousedown', (e) => { e.preventDefault(); e.stopPropagation(); });
+    fbtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (editing !== b.id) return;
+      focusFromEdit(b, el, caretOffsetIn(el.querySelector('.content')));
+    });
+  }
   updateBadge(el, b);
   updateHead(el, b);
 
@@ -1313,6 +1330,7 @@ function createBoxEl(b) {
           { label: t('menuCut'), action: () => document.execCommand('cut') },
           { label: t('menuCopy'), action: () => document.execCommand('copy') },
           { label: t('splitHere'), action: () => splitPending() },
+          { label: t('focusHere'), action: () => focusPending() },
         ], { keepFocus: true });
       }
     });
@@ -1802,6 +1820,22 @@ function splitPending() {
   const el = $('box' + p.id);
   if (!b || !el) return;
   splitBoxAt(b, el, p.idx);
+}
+// 編集中の箱から集中モードへ(右上の ⤢ / 右クリック「集中モードで開く」。⌘Enter と同じ振る舞い)。
+// caret は本文内の文字位置。閉じたら同じ位置で編集を再開する(openFocus の resume)
+function focusFromEdit(b, el, caret) {
+  if (!b || !el || b.type === 'image') return;
+  if (focusTarget || !overlayEl.hidden || linkPick || connectFrom !== null) return;
+  if (editing === b.id) document.activeElement?.blur(); // 本文を確定して編集を終える(blur ハンドラ)
+  if (!searchEl.hidden) closeSearch();
+  openFocus(b, el, { caret, resume: true });
+}
+// 右クリックメニューの「集中モードで開く」(pendingSplit に右クリック時のカーソル位置が入っている)
+function focusPending() {
+  const p = pendingSplit;
+  pendingSplit = null;
+  if (!p) return;
+  focusFromEdit(boxById(board(), p.id), $('box' + p.id), p.idx);
 }
 // クリックした点にキャレットを置く(選択が無いとき。ブラウザによっては右クリックで動かないため)
 function caretFromPoint(content, x, y) {
@@ -2594,6 +2628,8 @@ function applyLang() {
   $('setBtn').title = t('setT');
   $('addBoard').title = t('addBoardT');
   $('backBtn').title = t('backT');
+  $('appicon').title = TAURI ? t('libraryT') : '';
+  document.querySelectorAll('.box .focusbtn').forEach(x => { x.title = t('focusHere'); });
   searchInput.placeholder = t('searchPh');
   $('replaceInput').placeholder = t('replacePh');
   $('replaceAllBtn').textContent = t('replaceAll');
@@ -2615,6 +2651,15 @@ function applyLang() {
   if (TAURI) TAURI.core.invoke('set_menu_language', { lang }).catch(console.error);
 }
 
+// ライブラリ(ホーム)のウィンドウを前面に(左上の B / ⚙「ライブラリを開く」/ ウィンドウメニュー ⌘⇧L)
+function openLibrary() {
+  if (!TAURI) return;
+  TAURI.core.invoke('show_library_window', { newProject: false }).catch(e => console.error('show library failed', e));
+}
+// 左上の B: ブラウザ版(体験版)にはライブラリが無いので押せない飾りのまま
+if (TAURI) $('appicon').addEventListener('click', () => openLibrary());
+else $('appicon').disabled = true;
+
 $('setBtn').addEventListener('click', (e) => {
   const check = (cond) => !!cond;
   const items = [
@@ -2624,6 +2669,7 @@ $('setBtn').addEventListener('click', (e) => {
     { label: t('projSaveAs'), action: () => saveProjectAs() },
     ...(DEMO?.noOpen ? [] : [{ label: t('projNew'), action: () => newProject() }]), // 体験版では「開く」と同様に出さない
     ...(DEMO?.noOpen ? [] : [{ label: t('projOpen'), action: () => openProjectDialog() }]), // 体験版では出さない
+    ...(TAURI ? [{ label: t('openLibrary'), action: () => openLibrary() }] : []), // ライブラリ(ホーム)へ。ブラウザ版には無い
     ...(recentProjects.length && !DEMO?.noOpen ? [
       { header: t('recentLabel') },
       ...recentProjects.slice(0, 5).map(p => {
@@ -3834,6 +3880,7 @@ function kbShortcuts() {
     [`${M}S`, t('kbSave')],
     [`${SH}S`, t('kbSaveAs')],
     [`${M}O`, t('kbOpen')],
+    [`${SH}L`, t('kbLibrary')],
     [`${M}E`, t('kbExport')],
     [`${M}Z / ${SH}Z`, t('kbUndo')],
     [`${M}[`, t('kbBack')],
@@ -4220,6 +4267,7 @@ if (TAURI) {
     if (id === 'proj-save-as') { saveProjectAs(); return; }
     if (id === 'proj-new') { newProject(); return; }     // 集中モード中でも可(自分で確定して閉じる)
     if (id === 'split-here') { splitPending(); return; } // 編集中の右クリックメニュー(Rust の popup_edit_menu)
+    if (id === 'focus-here') { focusPending(); return; } // 同メニューの「集中モードで開く」
     // 編集メニューの 取り消す / やり直す(⌘Z / ⇧⌘Z はこの項目のアクセラレータとして届く)。
     // テキスト編集中で文字レベルで戻すものが残っていれば OS 標準(execCommand)、無ければキャンバス操作(keydown の ⌘Z と同じ規則)
     if (id === 'edit-undo') {

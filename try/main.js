@@ -58,6 +58,8 @@ const STR = {
     kbCopy: 'ボックスのコピー / 切り取り / 貼り付け（選択中）',
     splitHere: 'ここで分割', menuCut: '切り取り', menuCopy: 'コピー',
     focusHere: '集中モードで開く', openLibrary: 'ライブラリを開く', libraryT: 'ライブラリへ', kbLibrary: 'ライブラリ（ホーム）を開く',
+    mergeNext: '次の箱と結合', mergeSel: '選んだ箱を結合', mergeNextNone: '読み順で次の箱がありません',
+    kbCtxKey: '右クリック', kbCtx: '箱: 次の箱と結合（複数選択なら選んだ箱を結合）/ 編集中: ここで分割・集中モードで開く',
     splitCaretNone: 'カーソル位置の前後にテキストがないため分割できません',
     kbSplitCaret: 'カーソル位置で分割（テキスト編集中）',
     toVert: '縦書きへ', toHorz: '横書きへ',
@@ -214,6 +216,8 @@ const STR = {
     kbCopy: 'Copy / cut / paste boxes (while selected)',
     splitHere: 'Split Here', menuCut: 'Cut', menuCopy: 'Copy',
     focusHere: 'Open in Focus Mode', openLibrary: 'Open Library', libraryT: 'Library', kbLibrary: 'Open the library (home)',
+    mergeNext: 'Merge with Next Box', mergeSel: 'Merge Selected Boxes', mergeNextNone: 'No box after this one in reading order',
+    kbCtxKey: 'Right-click', kbCtx: 'Box: merge with the next box (or the selected boxes) / while editing: split here, open in focus mode',
     splitCaretNone: 'Nothing on one side of the cursor to split',
     kbSplitCaret: 'Split at cursor (while editing)',
     toVert: 'Vertical', toHorz: 'Horizontal',
@@ -1177,6 +1181,22 @@ function createBoxEl(b) {
   updateBadge(el, b);
   updateHead(el, b);
 
+  // 右クリック(編集中でないとき): 結合のメニュー。1 つなら「次の箱と結合」(読み順で次のテキストボックスを吸収)、
+  // 複数選択なら「選んだ箱を結合」(ツールバーの「結合」と同じ)。編集中は content 側のメニュー(ここで分割 / 集中モードで開く)に任せる
+  el.addEventListener('contextmenu', (e) => {
+    if (editing === b.id || b.type !== 'text' || e.target.closest('button')) return;
+    e.preventDefault();
+    if (linkPick || connectFrom !== null || !overlayEl.hidden) return;
+    if (!multiSel.has(b.id)) select(b.id);
+    const texts = [...multiSel].map(id => boxById(board(), id)).filter(x => x && x.type === 'text');
+    const items = texts.length >= 2
+      ? [{ label: t('mergeSel'), action: () => mergeSelection() }]
+      : [nextTextBox(b)
+          ? { label: t('mergeNext'), action: () => mergeWithNext(b) }
+          : { label: t('mergeNext'), cls: 'muted' }];
+    showMenu(e.clientX, e.clientY, items);
+  });
+
   // --- 選択 / リンク先選択 / 接続確定 / ドラッグ移動 ---
   el.addEventListener('mousedown', (e) => {
     endActiveGesture(); // 取りこぼしで残ったジェスチャがあれば確定してから (#6)
@@ -1210,6 +1230,8 @@ function createBoxEl(b) {
 
     const wasMultiMember = multiSel.size > 1 && multiSel.has(b.id);
     if (!multiSel.has(b.id)) select(b.id); // 未選択なら単独選択に置き換え(選択済みメンバーなら維持して一括ドラッグ)
+    // 右ボタン: 選択だけ行い、ドラッグと「動かさず離した → 単独選択に収束」はしない(複数選択のまま contextmenu のメニューを出すため)
+    if (e.button !== 0) { e.preventDefault(); return; }
 
     if (e.target.closest('button')) return; // badge など
     if (e.target.classList.contains('grip')) return;
@@ -1755,6 +1777,21 @@ function mergeSelection() {
   pushOp(op);
   applyOp(op, 1);
   hint(t('merged', targets.length));
+}
+// 読み順(Tab と同じ)で次のテキストボックス。無ければ null
+function nextTextBox(b) {
+  const list = readingOrder(board().boxes).filter(x => x.type === 'text');
+  const i = list.findIndex(x => x.id === b.id);
+  return i >= 0 && i < list.length - 1 ? list[i + 1] : null;
+}
+// 右クリック「次の箱と結合」: この箱と読み順で次の箱を選んで結合する(並び・接続・取り消しの規則は mergeSelection と同じ)
+function mergeWithNext(b) {
+  const nx = nextTextBox(b);
+  if (!nx) { hint(t('mergeNextNone'), 3000); return; }
+  multiSel.clear(); multiSel.add(b.id); multiSel.add(nx.id);
+  selected = b.id;
+  syncSelClasses();
+  mergeSelection();
 }
 
 // 分割は「カーソル位置で 2 つに」だけ(1.2 で空行ごとに分ける「分割」ボタンは廃止)。
@@ -3890,6 +3927,7 @@ function kbShortcuts() {
     [t('kbImgKey', M), t('kbImg')],
     [t('kbMultiKey'), t('kbMulti')],
     [t('kbDblKey'), t('kbDbl')],
+    [t('kbCtxKey'), t('kbCtx')],
     [t('kbZoomKey', M), t('kbZoom')],
     [`${M}/`, t('kbHelp')],
   ];

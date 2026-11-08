@@ -13,6 +13,7 @@
   --hairline: #DADDE3;
   --ui-fill: #E3E6EB;
   --selection: #3478F6;
+  --sel-tint: 9%; /* 選択した箱を選択色で染める強さ(複数選択でもどれが選ばれているか面で分かるように) */
   --danger: #E5484D;
   --wire: #9AA1AE;
 
@@ -62,6 +63,7 @@
   --hairline: #2A2C31;
   --ui-fill: #2B2D33;
   --selection: #4C8DFF;
+  --sel-tint: 14%;
   --danger: #FF5E5B;
   --wire: #5B606C;
 
@@ -264,7 +266,12 @@ body.tab-dragging { cursor: grabbing; user-select: none; -webkit-user-select: no
 .box.vertical { --padl: 24px; }
 .box.vertical.labeled { --padl: 26px; }
 .box.selected { box-shadow: var(--shadow-box-sel); }
-/* 選択インジケータ: 枠で囲わず、右上の小さなドットで控えめに示す */
+/* 選択インジケータ: 枠で囲わず、箱をうっすら選択色で染める + 右上の小さなドット(2026-11-08、複数選択で見分けやすく。試作 docs/design/selection-mock.html の②) */
+#viewport .box.selected,
+#viewport.overview .box[data-color].selected,
+:root[data-labels="pattern"] #viewport.overview .box[data-color].selected { /* 俯瞰時の色ラベルの wash / 模様モードの card-bg より優先 */
+  background: color-mix(in oklab, var(--selection) var(--sel-tint), var(--card-bg));
+}
 .box.selected::after {
   content: ""; position: absolute; top: 8px; right: 8px;
   width: 7px; height: 7px; border-radius: 50%;

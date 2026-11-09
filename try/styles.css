@@ -13,7 +13,7 @@
   --hairline: #DADDE3;
   --ui-fill: #E3E6EB;
   --selection: #3478F6;
-  --sel-tint: 9%; /* 選択した箱を選択色で染める強さ(複数選択でもどれが選ばれているか面で分かるように) */
+  --sel-tint: 5%; /* 選択した箱を選択色で染める強さ(複数選択でもどれが選ばれているか面で分かるように。2026-11-09 に 9%→5% へ、試作の候補 C) */
   --danger: #E5484D;
   --wire: #9AA1AE;
 
@@ -63,7 +63,7 @@
   --hairline: #2A2C31;
   --ui-fill: #2B2D33;
   --selection: #4C8DFF;
-  --sel-tint: 14%;
+  --sel-tint: 8%;
   --danger: #FF5E5B;
   --wire: #5B606C;
 
@@ -266,10 +266,11 @@ body.tab-dragging { cursor: grabbing; user-select: none; -webkit-user-select: no
 .box.vertical { --padl: 24px; }
 .box.vertical.labeled { --padl: 26px; }
 .box.selected { box-shadow: var(--shadow-box-sel); }
-/* 選択インジケータ: 枠で囲わず、箱をうっすら選択色で染める + 右上の小さなドット(2026-11-08、複数選択で見分けやすく。試作 docs/design/selection-mock.html の②) */
-#viewport .box.selected,
-#viewport.overview .box[data-color].selected,
-:root[data-labels="pattern"] #viewport.overview .box[data-color].selected { /* 俯瞰時の色ラベルの wash / 模様モードの card-bg より優先 */
+/* 選択インジケータ: 枠で囲わず、箱をごく薄く選択色で染める + 右上の小さなドット(2026-11-08、複数選択で見分けやすく。試作 docs/design/selection-mock.html の②→候補 C)
+   編集中の箱は染めない(書いている最中に文字の背景が変わる違和感をなくす。キャレットと右上の ⤢ で見失わない) */
+#viewport .box.selected:not(.editing),
+#viewport.overview .box[data-color].selected:not(.editing),
+:root[data-labels="pattern"] #viewport.overview .box[data-color].selected:not(.editing) { /* 俯瞰時の色ラベルの wash / 模様モードの card-bg より優先 */
   background: color-mix(in oklab, var(--selection) var(--sel-tint), var(--card-bg));
 }
 .box.selected::after {
